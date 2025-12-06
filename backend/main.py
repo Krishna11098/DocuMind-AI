@@ -62,3 +62,45 @@ app = FastAPI()
 def guess_mime(file_url):
     mime, _ = mimetypes.guess_type(file_url)
     return mime or "image/png"
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    same_site="lax",
+    https_only=SESSION_HTTPS_ONLY,  # set True in production
+    max_age=86400,  # 24 hours
+    session_cookie="session"
+)
+
+
+
+
+
+# ✅ CORS (for React frontend)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Configuration - In production, move these to environment variables
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET
+)
+
+# Configure Gemini AI (Google Generative AI)
+if GENAI_API_KEY:
+    try:
+        genai.configure(api_key=GENAI_API_KEY)
+    except Exception:
+        # Some genai versions expose configure differently; ignore if not applicable
+        pass
+
+# ---------------------------- UTIL FUNCTIONS ----------------------------
+def generate_password(length=8):
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(random.choice(chars) for _ in range(length))
