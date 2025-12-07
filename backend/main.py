@@ -134,3 +134,54 @@ def send_otp_email(receiver_email, otp):
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
         server.login(sender_email, sender_password)
         server.send_message(msg)
+
+def extract_text_from_pdf(file_url):
+    """Extract text from PDF file"""
+    try:
+        response = requests.get(file_url)
+        pdf_file = io.BytesIO(response.content)
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text.strip()
+    except Exception as e:
+        print(f"Error extracting PDF text: {e}")
+        return None
+
+def parse_gemini_response(response_text: str) -> dict:
+    """Parse Gemini response to extract JSON"""
+    try:
+        # Remove markdown code blocks
+        clean_text = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+        
+        # Find JSON pattern
+        json_pattern = r'\{.*\}'
+        match = re.search(json_pattern, clean_text, re.DOTALL)
+        
+        if match:
+            json_str = match.group(0)
+            return json.loads(json_str)
+        else:
+            return json.loads(clean_text)
+    except json.JSONDecodeError:
+        # Fallback parsing
+        result = {
+            "summary": "",
+            "document_type": "Unknown",
+            "key_findings": [],
+            "urgency_score": 50,
+            "importance_score": 50,
+            "departments_responsible": ["General"],
+            "confidence": 70
+        }
+        
+        # Try to extract summary
+        summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', response_text)
+        if summary_match:
+            result["summary"] = summary_match.group(1)
+        else:
+            result["summary"] = response_text[:200] + "..."
+        
+        return result
