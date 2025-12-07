@@ -185,3 +185,111 @@ def parse_gemini_response(response_text: str) -> dict:
             result["summary"] = response_text[:200] + "..."
         
         return result
+    
+    from google import genai
+from google.genai import types
+import mimetypes
+import fitz
+import requests
+
+client = genai.Client(api_key=GENAI_API_KEY) if GENAI_API_KEY else genai.Client()
+
+
+def analyze_document_with_gemini(file_url, file_type):
+    try:
+        # ---------- PDF CASE ----------
+        if file_type.lower() == "pdf":
+
+            # First try normal text extraction
+            text_content = extract_text_from_pdf(file_url)
+
+            # If digital PDF (text exists)
+            if text_content and len(text_content.strip()) > 30:
+                prompt = f"""
+                Analyze this document and return ONLY JSON with:
+                summary, document_type, key_findings,
+                urgency_score, importance_score,
+                departments_responsible, confidence.
+
+                Document text:
+                {text_content[:5000]}
+                """
+
+                result = client.models.generate_content(
+                    model="models/gemini-2.5-flash",
+                    contents=prompt
+                )
+                return parse_gemini_response(result.text)
+
+            # ---------- SCANNED PDF (NO TEXT) ----------
+            response = requests.get(file_url)
+            pdf_bytes = response.content
+
+            # Load the PDF
+            pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+            parts = []
+
+            for i in range(len(pdf)):
+                page = pdf.load_page(i)
+                pix = page.get_pixmap(dpi=180)   # good DPI for OCR
+                png_bytes = pix.tobytes("png")
+
+                part = types.Part(
+                    inline_data=types.Blob(
+                        mime_type="image/png",
+                        data=png_bytes
+                    )
+                )
+                parts.append(part)
+
+            prompt = """
+            Perform OCR on this scanned PDF and analyze it.
+            Return ONLY valid JSON with:
+            summary, document_type, key_findings,
+            urgency_score, importance_score,
+            departments_responsible, confidence.
+            """
+
+            result = client.models.generate_content(
+                model="models/gemini-2.5-flash-image",
+                contents=[*parts, prompt]
+            )
+
+            return parse_gemini_response(result.text)
+
+        # ---------- IMAGE CASE ----------
+        else:
+            response = requests.get(file_url)
+            image_bytes = response.content
+
+            # Find MIME type
+            mime = response.headers.get("Content-Type")
+            if not mime or mime == "application/octet-stream":
+                mime = mimetypes.guess_type(file_url)[0] or "image/png"
+
+            image_part = types.Part(
+                inline_data=types.Blob(
+                    mime_type=mime,
+                    data=image_bytes
+                )
+            )
+
+            prompt = """
+            Analyze this image (OCR if needed).
+            Return ONLY valid JSON with:
+            summary, document_type, key_findings,
+            urgency_score, importance_score,
+            departments_responsible, confidence.
+            """
+
+            result = client.models.generate_content(
+                model="models/gemini-2.5-flash-image",
+                contents=[image_part, prompt]
+            )
+
+            return parse_gemini_response(result.text)
+
+    except Exception as e:
+        print("Error analyzing document with Gemini:", e)
+        return None
