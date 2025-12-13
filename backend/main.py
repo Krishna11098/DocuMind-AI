@@ -293,3 +293,270 @@ def analyze_document_with_gemini(file_url, file_type):
     except Exception as e:
         print("Error analyzing document with Gemini:", e)
         return None
+
+def get_current_user(request: Request):
+    """Get current user from session"""
+    if "email" not in request.session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    return {
+        "email": request.session["email"],
+        "isAdmin": request.session.get("isAdmin", False),
+        "company_name": request.session.get("company_name")
+    }
+
+def require_admin(request: Request):
+    """Check if user is admin"""
+    user = get_current_user(request)
+    if not user.get("isAdmin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+def require_auth(request: Request):
+    """Check if user is authenticated"""
+    return get_current_user(request)
+
+# ---------------------------- AUTH ROUTES ----------------------------
+
+@app.post("/signup/")
+async def signup(request: Request, user: UserSignup):
+    """Step 1: Start signup process by sending OTP"""
+    try:
+        # Check if user already exists
+        doc_ref = db.collection("users").document(user.email)
+        if doc_ref.get().exists:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        
+        # Generate OTP
+        otp = ''.join(random.choices(string.digits, k=6))
+        
+        # # Send OTP email
+        # send_otp_email(user.email, otp)
+
+        # Send OTP email asynchronously
+        send_otp_email_task.delay(user.email, otp)
+        
+        # Store OTP and user data in session for verification
+        request.session["signup_otp"] = otp
+        request.session["signup_user"] = {
+            "name": user.name,
+            "email": user.email,
+            "password": user.password,  # Store plain password for now
+            "company_name": user.company_name,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Set OTP expiry (5 minutes from now)
+        request.session["signup_otp_expiry"] = datetime.now().timestamp() + 300
+        request.session["signup_failed_attempts"] = 0
+        
+        return {
+            "success": True,
+            "message": "OTP sent to email. Please verify to complete signup.",
+            "email": user.email
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Signup error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start signup: {str(e)}")
+
+@app.post("/verify-signup-otp/")
+async def verify_signup_otp(request: Request, otp_data: OtpVerification):
+    """Step 2: Verify OTP and create user account"""
+    try:
+        # Check if OTP exists in session
+        if "signup_otp" not in request.session or "signup_user" not in request.session:
+            raise HTTPException(status_code=400, detail="Signup session expired or not found")
+        
+        # Check OTP expiry
+        expiry_time = request.session.get("signup_otp_expiry")
+        if expiry_time and datetime.now().timestamp() > expiry_time:
+            # Clear expired session
+            request.session.clear()
+            raise HTTPException(status_code=400, detail="OTP has expired. Please start signup again.")
+        
+        # Verify OTP
+        stored_otp = request.session.get("signup_otp")
+        if stored_otp != otp_data.otp:
+            # Increment failed attempts counter
+            failed_attempts = request.session.get("signup_failed_attempts", 0) + 1
+            request.session["signup_failed_attempts"] = failed_attempts
+            
+            if failed_attempts >= 3:
+                # Clear session after too many failed attempts
+                request.session.clear()
+                raise HTTPException(status_code=400, detail="Too many failed attempts. Please start signup again.")
+            
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+        
+        # Get user data from session
+        user_data = request.session.get("signup_user")
+        if not user_data:
+            raise HTTPException(status_code=400, detail="User data not found in session")
+        
+        # Verify email matches
+        if user_data["email"] != otp_data.email:
+            raise HTTPException(status_code=400, detail="Email mismatch")
+        
+        # Check if user was created in the meantime
+        doc_ref = db.collection("users").document(otp_data.email)
+        if doc_ref.get().exists:
+            raise HTTPException(status_code=400, detail="User already exists")
+        
+        # Hash password
+        hashed_pw = hashlib.sha256(user_data["password"].encode()).hexdigest()
+        
+        # Create user in database
+        user = User(
+            name=user_data["name"],
+            email=user_data["email"],
+            password=hashed_pw,
+            department_name=None,
+            company_name=user_data["company_name"],
+            isAdmin=True
+        )
+        
+        # Save to database
+        doc_ref.set(user.dict())
+        
+        # Clear session data
+        request.session.clear()
+        
+        # Create session for immediate login
+        request.session["email"] = user.email
+        request.session["isAdmin"] = True
+        request.session["company_name"] = user.company_name
+        request.session["name"] = user.name
+        
+        return {
+            "success": True,
+            "message": "Signup successful! Account created.",
+            "user": {
+                "name": user.name,
+                "email": user.email,
+                "company_name": user.company_name,
+                "isAdmin": user.isAdmin
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"OTP verification error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to verify OTP: {str(e)}")
+
+@app.post("/resend-signup-otp/")
+async def resend_signup_otp(request: Request):
+    """Resend OTP for signup verification"""
+    try:
+        # Check if user data exists in session
+        if "signup_user" not in request.session:
+            raise HTTPException(status_code=400, detail="No signup in progress")
+        
+        user_data = request.session.get("signup_user")
+        
+        # Generate new OTP
+        new_otp = ''.join(random.choices(string.digits, k=6))
+        
+        # # Send OTP email
+        # send_otp_email(user_data["email"], new_otp)
+
+        # Send OTP email asynchronously
+        send_otp_email_task.delay(user_data["email"], new_otp)
+        
+        # Update session with new OTP
+        request.session["signup_otp"] = new_otp
+        request.session["signup_otp_expiry"] = datetime.now().timestamp() + 300  # 5 minutes
+        request.session["signup_failed_attempts"] = 0  # Reset failed attempts
+        
+        return {
+            "success": True,
+            "message": "New OTP sent to your email",
+            "email": user_data["email"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Resend OTP error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resend OTP: {str(e)}")
+
+@app.post("/login/")
+async def login(request: Request, user: UserLogin):
+    """Login with email and password"""
+    try:
+        doc_ref = db.collection("users").document(user.email)
+        doc = doc_ref.get()
+        if not doc.exists:
+            raise HTTPException(status_code=400, detail="Invalid email or password")
+
+        user_data = doc.to_dict()
+        hashed_pw = hashlib.sha256(user.password.encode()).hexdigest()
+
+        if user_data["password"] != hashed_pw:
+            raise HTTPException(status_code=400, detail="Invalid email or password")
+
+        # Save user session
+        request.session["email"] = user.email
+        request.session["isAdmin"] = user_data["isAdmin"]
+        request.session["company_name"] = user_data.get("company_name")
+        request.session["name"] = user_data.get("name")
+        request.session["department_name"] = user_data.get("department_name")
+
+        return {
+            "success": True,
+            "message": "Login successful",
+            "user": {
+                "name": user_data.get("name"),
+                "email": user_data.get("email"),
+                "company_name": user_data.get("company_name"),
+                "isAdmin": user_data.get("isAdmin", False),
+                "department_name": user_data.get("department_name")
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/logout/")
+async def logout(request: Request):
+    """Logout user"""
+    request.session.clear()
+    return {
+        "success": True,
+        "message": "Logged out successfully"
+    }
+
+@app.get("/me/")
+async def get_me(request: Request):
+    """Return currently logged-in user info"""
+    try:
+        if "email" not in request.session:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        email = request.session["email"]
+        doc = db.collection("users").document(email).get()
+        if not doc.exists:
+            # Clear invalid session
+            request.session.clear()
+            raise HTTPException(status_code=404, detail="User not found")
+
+        user_data = doc.to_dict()
+        # Remove password from response
+        user_data.pop("password", None)
+        
+        return {
+            "success": True,
+            "message": "User data fetched",
+            "user": user_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
