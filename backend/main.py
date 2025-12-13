@@ -560,3 +560,99 @@ async def get_me(request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+# ---------------------------- FORGOT PASSWORD ROUTES ----------------------------
+
+@app.post("/forgot-password/")
+async def forgot_password(request: Request, email_data: UserForgotPassword):
+    """Send OTP for password reset"""
+    try:
+        email = email_data.email
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        # Check if user exists
+        doc_ref = db.collection("users").document(email)
+        doc = doc_ref.get()
+        if not doc.exists:
+            # Don't reveal that user doesn't exist for security
+            return {
+                "success": True,
+                "message": "If an account exists with this email, you will receive an OTP"
+            }
+        
+        # Generate OTP
+        otp = ''.join(random.choices(string.digits, k=6))
+        
+        # Send OTP email
+        send_otp_email(email, otp)
+        
+        # Store OTP in session
+        request.session["reset_password_otp"] = otp
+        request.session["reset_password_email"] = email
+        request.session["reset_password_otp_expiry"] = datetime.now().timestamp() + 300
+        
+        return {
+            "success": True,
+            "message": "OTP sent to email"
+        }
+        
+    except Exception as e:
+        print(f"Forgot password error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/reset-password/")
+async def reset_password(request: Request, reset_data: UserResetPassword):
+    """Reset password with OTP verification"""
+    try:
+        email = reset_data.email
+        otp = reset_data.otp
+        new_password = reset_data.new_password
+        
+        if not all([email, otp, new_password]):
+            raise HTTPException(status_code=400, detail="Email, OTP and new password are required")
+        
+        # Check OTP in session
+        stored_otp = request.session.get("reset_password_otp")
+        stored_email = request.session.get("reset_password_email")
+        expiry_time = request.session.get("reset_password_otp_expiry")
+        
+        if not stored_otp or not stored_email:
+            raise HTTPException(status_code=400, detail="OTP session expired")
+        
+        if datetime.now().timestamp() > expiry_time:
+            request.session.pop("reset_password_otp", None)
+            request.session.pop("reset_password_email", None)
+            request.session.pop("reset_password_otp_expiry", None)
+            raise HTTPException(status_code=400, detail="OTP has expired")
+        
+        if stored_otp != otp or stored_email != email:
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+        
+        # Hash new password
+        hashed_pw = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        # Update password in database
+        doc_ref = db.collection("users").document(email)
+        if not doc_ref.get().exists:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        doc_ref.update({"password": hashed_pw})
+        
+        # Clear session
+        request.session.pop("reset_password_otp", None)
+        request.session.pop("reset_password_email", None)
+        request.session.pop("reset_password_otp_expiry", None)
+        
+        return {
+            "success": True,
+            "message": "Password reset successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Reset password error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
