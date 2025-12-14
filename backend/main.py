@@ -743,3 +743,174 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze-text/")
+async def analyze_text(request: Request, text: str = Form(...)):
+    """Analyze text input using Gemini AI"""
+    try:
+        session = require_admin(request)
+        
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = f"""
+        Analyze this document text and provide:
+        1. Summary (2-3 sentences)
+        2. Document type
+        3. Key findings (list)
+        4. Urgency score (0-100)
+        5. Importance score (0-100)
+        6. Departments that should handle this (list)
+        7. Confidence level (0-100)
+        
+        Document text:
+        {text}
+        
+        Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
+        """
+        
+        response = model.generate_content(prompt)
+        return {"analysis": response.text}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analyze-document/")
+async def analyze_document(request: Request, analyze_request: AnalyzeDocumentRequest):
+    """Analyze document using Gemini AI"""
+    try:
+        session = require_admin(request)
+        
+        # Get document from Firestore
+        doc_ref = db.collection("documents").document(analyze_request.document_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        document_data = doc.to_dict()
+        
+        # Check if document belongs to admin's company
+        if document_data["company_name"] != session["company_name"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        # Update status to processing
+        doc_ref.update({"processing_status": DocumentStatus.PROCESSING})
+        
+        # Determine file type from URL or filename
+        file_name = document_data["file_name"].lower()
+        file_type = "pdf" if file_name.endswith('.pdf') else "image"
+        
+        # Analyze with Gemini
+        analysis_result = analyze_document_with_gemini(document_data["file_url"], file_type)
+        
+        if not analysis_result:
+            doc_ref.update({
+                "processing_status": DocumentStatus.PENDING,
+                "error_message": "Failed to analyze document"
+            })
+            raise HTTPException(status_code=500, detail="Failed to analyze document")
+            
+        # Parse Gemini response (assuming it returns JSON-like text)
+        import json
+        try:
+            # Clean the response and extract JSON
+            clean_response = analysis_result.replace('```json', '').replace('```', '').strip()
+            analysis_data = json.loads(clean_response)
+        except:
+            # If parsing fails, create a basic structure
+            analysis_data = {
+                "summary": analysis_result[:200] + "..." if len(analysis_result) > 200 else analysis_result,
+                "document_type": "Unknown",
+                "key_findings": ["Analysis completed"],
+                "urgency_score": 50,
+                "importance_score": 50,
+                "departments_responsible": ["General"],
+                "confidence": 70
+            }
+            
+        # Update document with analysis results
+        update_data = {
+            "processing_status": DocumentStatus.ANALYZED,
+            "summary": analysis_data.get("summary", ""),
+            "document_type": analysis_data.get("document_type", "Unknown"),
+            "urgency_score": analysis_data.get("urgency_score", 50),
+            "importance_score": analysis_data.get("importance_score", 50),
+            "departments_responsible": analysis_data.get("departments_responsible", []),
+            "confidence": analysis_data.get("confidence", 70),
+            "key_findings": analysis_data.get("key_findings", []),
+            "analyzed_at": datetime.now()
+        }
+        
+        doc_ref.update(update_data)
+        
+        return {"message": "Document analyzed successfully", "analysis": analysis_data}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/assign-document/")
+async def assign_document(request: Request, assign_request: AssignDocumentRequest):
+    """Admin assigns document to departments"""
+    try:
+        session = require_admin(request)
+        
+        # Get document
+        doc_ref = db.collection("documents").document(assign_request.document_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        document_data = doc.to_dict()
+        
+        # Check access
+        if document_data["company_name"] != session["company_name"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        # Update document with assignments
+        doc_ref.update({
+            "departments_assigned": assign_request.departments,
+            "processing_status": DocumentStatus.ASSIGNED,
+            "assigned_at": datetime.now()
+        })
+        
+        # Get all users in assigned departments
+        users_query = db.collection("users").where("company_name", "==", session["company_name"])
+        users = users_query.get()
+        
+        assigned_users = []
+        for user_doc in users:
+            user_data = user_doc.to_dict()
+            if (not user_data.get("isAdmin", False) and 
+                user_data.get("department_name") in assign_request.departments):
+                
+                # Add document to user's received docs
+                user_docs = user_data.get("docs_received", [])
+                if assign_request.document_id not in user_docs:
+                    user_docs.append(assign_request.document_id)
+                    
+                    db.collection("users").document(user_data["email"]).update({
+                        "docs_received": user_docs
+                    })
+                    
+                    # Create personal document status record
+                    personal_doc = PersonalDocumentStatus(
+                        document_id=assign_request.document_id,
+                        employee_email=user_data["email"],
+                        personal_status=PersonalDocStatus.PENDING,
+                        last_updated=datetime.now()
+                    )
+                    
+                    db.collection("personal_doc_status").add(personal_doc.dict())
+                    assigned_users.append(user_data["email"])
+                    
+        return {
+            "message": "Document assigned successfully",
+            "assigned_to": assigned_users,
+            "departments": assign_request.departments
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
