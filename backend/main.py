@@ -655,4 +655,91 @@ async def reset_password(request: Request, reset_data: UserResetPassword):
         print(f"Reset password error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ---------------------------- ADMIN ROUTES ----------------------------
 
+@app.post("/add-employee/")
+async def add_employee(request: Request, employee: EmployeeCreate):
+    """Admin-only: Add employee to same company"""
+    try:
+        # Check if user is logged in
+        session_data = require_admin(request)
+        
+        # Check if employee already exists
+        emp_ref = db.collection("users").document(employee.email)
+        if emp_ref.get().exists:
+            raise HTTPException(status_code=400, detail="Employee already exists")
+
+        # Generate and hash password
+        random_pw = generate_password()
+        hashed_pw = hashlib.sha256(random_pw.encode()).hexdigest()
+
+        # Create employee record
+        user_data = User(
+            name=employee.name,
+            email=employee.email,
+            password=hashed_pw,
+            department_name=employee.department_name,
+            company_name=session_data["company_name"],
+            isAdmin=False
+        )
+        emp_ref.set(user_data.dict())
+
+        # # Send password to employee email
+        # send_email(employee.email, random_pw)
+
+        # Send password to employee email asynchronously
+        send_email_task.delay(employee.email, random_pw)
+
+        return {
+            "success": True,
+            "message": f"Employee {employee.name} added successfully",
+            "password_sent": True
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ---------------------------- DOCUMENT MANAGEMENT ROUTES ----------------------------
+
+@app.post("/upload-file/")
+async def upload_file(request: Request, file: UploadFile = File(...)):
+    """Admin uploads a file to Cloudinary and creates document record"""
+    try:
+        session = require_admin(request)
+        
+        # Upload to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            file.file,
+            resource_type="raw",  # Automatically detect file type
+            folder="documents"
+        )
+        
+        file_url = upload_result["secure_url"]
+        document_id = str(uuid.uuid4())
+        
+        # Create document record
+        document = Document(
+            document_id=document_id,
+            file_name=file.filename,
+            file_url=file_url,
+            uploaded_by=session["email"],
+            company_name=session["company_name"],
+            timestamp=datetime.now()
+        )
+        
+        # Save to Firestore
+        doc_ref = db.collection("documents").document(document_id)
+        doc_ref.set(document.dict())
+        
+        return FileUploadResponse(
+            file_url=file_url,
+            document_id=document_id,
+            message="File uploaded successfully"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
