@@ -129,7 +129,7 @@ DocuMind-AI is an **enterprise-grade, AI-powered document management system** de
 
 ---
 
-## 🚀 Coming in Next 48-72 Hours (To Impress Google Interviewers)
+## 🚀 Coming in Next 48-72 Hours
 
 ### 1. 📊 **Advanced Analytics Dashboard** (24 hours)
 - [ ] Real-time metrics: documents processed, pending reviews, approval rates
@@ -138,7 +138,7 @@ DocuMind-AI is an **enterprise-grade, AI-powered document management system** de
 - [ ] Document trends over time
 - [ ] Export reports to PDF/Excel
 
-**Why this matters**: Demonstrates **data visualization skills**, **async processing**, and **real-time analytics** - core to Google's data-driven culture.
+**Why this matters**: Demonstrates **data visualization skills**, **async processing**, and **real-time analytics** - essential for modern data-driven organizations.
 
 ### 2. 🔍 **Semantic Search with Vector Embeddings** (36 hours)
 - [ ] Integrate vector database (Pinecone/Weaviate)
@@ -147,7 +147,7 @@ DocuMind-AI is an **enterprise-grade, AI-powered document management system** de
 - [ ] "Find all contracts mentioning X" functionality
 - [ ] Search result ranking by relevance
 
-**Why this matters**: Shows understanding of **modern ML/AI techniques**, **vector databases**, and **information retrieval** - hot topics at Google.
+**Why this matters**: Shows understanding of **modern ML/AI techniques**, **vector databases**, and **information retrieval** - cutting-edge technology in the industry.
 
 ### 3. ⚡ **Real-Time Collaboration Features** (48 hours)
 - [ ] WebSocket integration for live updates
@@ -156,7 +156,7 @@ DocuMind-AI is an **enterprise-grade, AI-powered document management system** de
 - [ ] Collaborative document comments
 - [ ] Activity feed
 
-**Why this matters**: Demonstrates **distributed systems knowledge**, **real-time architectures**, and **scalability thinking** - critical for Google-scale systems.
+**Why this matters**: Demonstrates **distributed systems knowledge**, **real-time architectures**, and **scalability thinking** - critical for enterprise-scale systems.
 
 ### 4. 🧪 **Automated Testing & CI/CD** (24 hours)
 - [ ] Unit tests for backend (pytest)
@@ -165,7 +165,7 @@ DocuMind-AI is an **enterprise-grade, AI-powered document management system** de
 - [ ] GitHub Actions CI/CD pipeline
 - [ ] Code coverage reports (>80%)
 
-**Why this matters**: Shows **software engineering discipline**, **quality assurance**, and **DevOps practices** - essential at Google.
+**Why this matters**: Shows **software engineering discipline**, **quality assurance**, and **DevOps practices** - industry best practices.
 
 ### 5. 🐳 **Docker Containerization** (12 hours)
 - [ ] Dockerfile for backend
@@ -174,7 +174,7 @@ DocuMind-AI is an **enterprise-grade, AI-powered document management system** de
 - [ ] Multi-stage builds for optimization
 - [ ] Container orchestration ready
 
-**Why this matters**: Demonstrates **cloud-native development**, **containerization**, and **deployment expertise** - Google Cloud Platform focus.
+**Why this matters**: Demonstrates **cloud-native development**, **containerization**, and **deployment expertise** - essential for modern deployments.
 
 ---
 
@@ -284,8 +284,6 @@ EMAIL_PASSWORD=your_app_password
 
 ## 🎓 What This Project Demonstrates
 
-### For Google Interviewers:
-
 ✅ **System Design**: Multi-tenant SaaS architecture with proper data isolation  
 ✅ **Scalability**: Designed for horizontal scaling with cloud services  
 ✅ **Security**: Session management, OTP verification, password hashing  
@@ -325,10 +323,8 @@ This is an interview/portfolio project, but suggestions are welcome! Open an iss
 
 ## 📧 Contact
 
-**Developer**: [Your Name]  
-**Email**: [Your Email]  
-**LinkedIn**: [Your LinkedIn]  
-**Portfolio**: [Your Portfolio]
+**Email**: u24cs068@coed.svnit.ac.in  
+**Institution**: Sardar Vallabhbhai National Institute of Technology (SVNIT), Surat
 
 ---
 
