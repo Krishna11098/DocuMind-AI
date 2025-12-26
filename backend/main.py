@@ -1,3 +1,6 @@
+
+
+
 # main.py - Complete corrected version
 from fastapi import FastAPI, HTTPException, Request, Depends, Form
 from fastapi.responses import JSONResponse
@@ -8,7 +11,8 @@ from models import (UserSignup, User, EmployeeCreate, UserLogin,
                     DocumentCreate, Document, PersonalDocumentStatus,
                     AnalyzeDocumentRequest, AssignDocumentRequest, 
                     UpdateDocumentStatusRequest, UpdatePersonalDocStatusRequest,
-                    FileUploadResponse, DocumentStatus, PersonalDocStatus, OtpVerification,     SignupVerification, UserForgotPassword, UserResetPassword)
+                    FileUploadResponse, DocumentStatus, PersonalDocStatus, OtpVerification,     SignupVerification, UserForgotPassword, UserResetPassword,
+                    Department, DepartmentWithEmployees, CreateDepartmentRequest)
 import hashlib
 import random
 import string
@@ -63,6 +67,7 @@ def guess_mime(file_url):
     mime, _ = mimetypes.guess_type(file_url)
     return mime or "image/png"
 
+# ✅ Add session middleware with better configuration
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET_KEY,
@@ -185,8 +190,10 @@ def parse_gemini_response(response_text: str) -> dict:
             result["summary"] = response_text[:200] + "..."
         
         return result
-    
-    from google import genai
+
+
+
+from google import genai
 from google.genai import types
 import mimetypes
 import fitz
@@ -294,6 +301,8 @@ def analyze_document_with_gemini(file_url, file_type):
         print("Error analyzing document with Gemini:", e)
         return None
 
+
+
 def get_current_user(request: Request):
     """Get current user from session"""
     if "email" not in request.session:
@@ -333,8 +342,8 @@ async def signup(request: Request, user: UserSignup):
         # # Send OTP email
         # send_otp_email(user.email, otp)
 
-        # Send OTP email asynchronously
-        send_otp_email_task.delay(user.email, otp)
+        # Send OTP email
+        send_otp_email(user.email, otp)
         
         # Store OTP and user data in session for verification
         request.session["signup_otp"] = otp
@@ -415,7 +424,8 @@ async def verify_signup_otp(request: Request, otp_data: OtpVerification):
             password=hashed_pw,
             department_name=None,
             company_name=user_data["company_name"],
-            isAdmin=True
+            isAdmin=True,
+            departments=[]  # Initialize empty departments list for admin
         )
         
         # Save to database
@@ -463,8 +473,8 @@ async def resend_signup_otp(request: Request):
         # # Send OTP email
         # send_otp_email(user_data["email"], new_otp)
 
-        # Send OTP email asynchronously
-        send_otp_email_task.delay(user_data["email"], new_otp)
+        # Send OTP email
+        send_otp_email(user_data["email"], new_otp)
         
         # Update session with new OTP
         request.session["signup_otp"] = new_otp
@@ -560,7 +570,7 @@ async def get_me(request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 # ---------------------------- FORGOT PASSWORD ROUTES ----------------------------
 
 @app.post("/forgot-password/")
@@ -687,8 +697,8 @@ async def add_employee(request: Request, employee: EmployeeCreate):
         # # Send password to employee email
         # send_email(employee.email, random_pw)
 
-        # Send password to employee email asynchronously
-        send_email_task.delay(employee.email, random_pw)
+        # Send password to employee email
+        send_email(employee.email, random_pw)
 
         return {
             "success": True,
@@ -701,6 +711,116 @@ async def add_employee(request: Request, employee: EmployeeCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ---------------------------- DEPARTMENT MANAGEMENT ROUTES ----------------------------
+
+@app.post("/create-department/")
+async def create_department(request: Request, dept_request: CreateDepartmentRequest):
+    """Admin creates a new department in their company"""
+    try:
+        session = require_admin(request)
+        
+        # Check if department already exists
+        existing_depts = db.collection("departments").where(
+            "company_name", "==", session["company_name"]
+        ).where(
+            "department_name", "==", dept_request.department_name
+        ).get()
+        
+        if existing_depts:
+            raise HTTPException(status_code=400, detail="Department already exists")
+        
+        # Create department
+        department_id = str(uuid.uuid4())
+        department = Department(
+            department_id=department_id,
+            department_name=dept_request.department_name,
+            company_name=session["company_name"],
+            created_by=session["email"],
+            created_at=datetime.now(),
+            description=dept_request.description
+        )
+        
+        # Save to Firestore
+        db.collection("departments").document(department_id).set(department.dict())
+        
+        # Update admin's user record with the new department
+        admin_ref = db.collection("users").document(session["email"])
+        admin_doc = admin_ref.get()
+        
+        if admin_doc.exists:
+            admin_data = admin_doc.to_dict()
+            departments = admin_data.get("departments", [])
+            if dept_request.department_name not in departments:
+                departments.append(dept_request.department_name)
+                admin_ref.update({"departments": departments})
+        
+        return {
+            "success": True,
+            "message": f"Department '{dept_request.department_name}' created successfully",
+            "department_id": department_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/departments/")
+async def get_departments(request: Request):
+    """Get all departments of admin's company with employee counts and details"""
+    try:
+        session = require_admin(request)
+        
+        # Get all departments for this company
+        departments_query = db.collection("departments").where(
+            "company_name", "==", session["company_name"]
+        ).get()
+        
+        departments_list = []
+        
+        for dept_doc in departments_query:
+            dept_data = dept_doc.to_dict()
+            
+            # Get all employees in this department
+            employees_query = db.collection("users").where(
+                "company_name", "==", session["company_name"]
+            ).where(
+                "department_name", "==", dept_data["department_name"]
+            ).get()
+            
+            employees = []
+            for emp_doc in employees_query:
+                emp_data = emp_doc.to_dict()
+                # Remove sensitive information
+                emp_data.pop("password", None)
+                employees.append({
+                    "name": emp_data.get("name"),
+                    "email": emp_data.get("email"),
+                    "isAdmin": emp_data.get("isAdmin", False),
+                    "department_name": emp_data.get("department_name")
+                })
+            
+            dept_with_employees = DepartmentWithEmployees(
+                department_id=dept_doc.id,
+                department_name=dept_data.get("department_name"),
+                description=dept_data.get("description"),
+                employee_count=len(employees),
+                employees=employees
+            )
+            
+            departments_list.append(dept_with_employees.dict())
+        
+        return {
+            "success": True,
+            "company_name": session["company_name"],
+            "total_departments": len(departments_list),
+            "departments": departments_list
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------- DOCUMENT MANAGEMENT ROUTES ----------------------------
@@ -811,23 +931,8 @@ async def analyze_document(request: Request, analyze_request: AnalyzeDocumentReq
             })
             raise HTTPException(status_code=500, detail="Failed to analyze document")
             
-        # Parse Gemini response (assuming it returns JSON-like text)
-        import json
-        try:
-            # Clean the response and extract JSON
-            clean_response = analysis_result.replace('```json', '').replace('```', '').strip()
-            analysis_data = json.loads(clean_response)
-        except:
-            # If parsing fails, create a basic structure
-            analysis_data = {
-                "summary": analysis_result[:200] + "..." if len(analysis_result) > 200 else analysis_result,
-                "document_type": "Unknown",
-                "key_findings": ["Analysis completed"],
-                "urgency_score": 50,
-                "importance_score": 50,
-                "departments_responsible": ["General"],
-                "confidence": 70
-            }
+        # analyze_document_with_gemini already returns a parsed dictionary
+        analysis_data = analysis_result
             
         # Update document with analysis results
         update_data = {
@@ -910,6 +1015,181 @@ async def assign_document(request: Request, assign_request: AssignDocumentReques
             "message": "Document assigned successfully",
             "assigned_to": assigned_users,
             "departments": assign_request.departments
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/update-document-status/")
+async def update_document_status(request: Request, status_request: UpdateDocumentStatusRequest):
+    """Admin updates document status (complete/ignore/delete)"""
+    try:
+        session = require_admin(request)
+        
+        doc_ref = db.collection("documents").document(status_request.document_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        document_data = doc.to_dict()
+        
+        if document_data["company_name"] != session["company_name"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        update_data = {"processing_status": status_request.status}
+        
+        if status_request.status == DocumentStatus.COMPLETED:
+            update_data["completed_at"] = datetime.now()
+        elif status_request.status == DocumentStatus.DELETED:
+            update_data["deleted_at"] = datetime.now()
+            
+        doc_ref.update(update_data)
+        
+        return {"message": f"Document status updated to {status_request.status}"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documents/")
+async def get_documents(request: Request):
+    """Get all documents for admin or user's assigned documents"""
+    try:
+        session = require_auth(request)
+        
+        if session.get("isAdmin", False):
+            # Admin sees all company documents
+            docs_query = db.collection("documents").where(
+                "company_name", "==", session["company_name"]
+            ).order_by("timestamp", direction="DESCENDING")
+        else:
+            # Employee sees only assigned documents
+            user_doc = db.collection("users").document(session["email"]).get()
+            user_data = user_doc.to_dict()
+            doc_ids = user_data.get("docs_received", [])
+            
+            if not doc_ids:
+                return {"documents": []}
+                
+            # Get documents by IDs
+            documents = []
+            for doc_id in doc_ids:
+                doc = db.collection("documents").document(doc_id).get()
+                if doc.exists:
+                    doc_data = doc.to_dict()
+                    
+                    # Get personal status for this document
+                    personal_status_query = db.collection("personal_doc_status").where(
+                        "document_id", "==", doc_id
+                    ).where("employee_email", "==", session["email"])
+                    
+                    personal_docs = list(personal_status_query.get())
+                    if personal_docs:
+                        personal_data = personal_docs[0].to_dict()
+                        doc_data["personal_status"] = personal_data.get("personal_status")
+                        doc_data["personal_comments"] = personal_data.get("comments")
+                        
+                    documents.append(doc_data)
+                    
+            return {"documents": documents}
+            
+        docs = docs_query.get()
+        documents = [doc.to_dict() for doc in docs]
+        
+        return {"documents": documents}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/update-personal-doc-status/")
+async def update_personal_doc_status(request: Request, status_request: UpdatePersonalDocStatusRequest):
+    """Employee updates their personal document status and comments"""
+    try:
+        session = require_auth(request)
+        
+        # Check if user has access to this document
+        user_doc = db.collection("users").document(session["email"]).get()
+        user_data = user_doc.to_dict()
+        
+        if status_request.document_id not in user_data.get("docs_received", []):
+            raise HTTPException(status_code=403, detail="Document not assigned to you")
+            
+        # Find and update personal document status
+        personal_status_query = db.collection("personal_doc_status").where(
+            "document_id", "==", status_request.document_id
+        ).where("employee_email", "==", session["email"])
+        
+        personal_docs = list(personal_status_query.get())
+        
+        if personal_docs:
+            # Update existing record
+            personal_doc_ref = personal_docs[0].reference
+            personal_doc_ref.update({
+                "personal_status": status_request.status,
+                "comments": status_request.comments,
+                "last_updated": datetime.now()
+            })
+        else:
+            # Create new record
+            personal_doc = PersonalDocumentStatus(
+                document_id=status_request.document_id,
+                employee_email=session["email"],
+                personal_status=status_request.status,
+                comments=status_request.comments,
+                last_updated=datetime.now()
+            )
+            db.collection("personal_doc_status").add(personal_doc.dict())
+            
+        return {"message": "Personal document status updated successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/employee-document-status/{document_id}")
+async def get_employee_document_status(request: Request, document_id: str):
+    """Admin views all employee statuses for a specific document"""
+    try:
+        session = require_admin(request)
+        
+        # Verify document belongs to admin's company
+        doc_ref = db.collection("documents").document(document_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        document_data = doc.to_dict()
+        if document_data["company_name"] != session["company_name"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        # Get all personal statuses for this document
+        personal_status_query = db.collection("personal_doc_status").where(
+            "document_id", "==", document_id
+        )
+        
+        personal_statuses = personal_status_query.get()
+        employee_statuses = []
+        
+        for status_doc in personal_statuses:
+            status_data = status_doc.to_dict()
+            
+            # Get employee name
+            employee_doc = db.collection("users").document(status_data["employee_email"]).get()
+            if employee_doc.exists:
+                employee_data = employee_doc.to_dict()
+                status_data["employee_name"] = employee_data.get("name")
+                status_data["department_name"] = employee_data.get("department_name")
+                
+            employee_statuses.append(status_data)
+            
+        return {
+            "document_id": document_id,
+            "document_name": document_data.get("file_name"),
+            "employee_statuses": employee_statuses
         }
         
     except Exception as e:
