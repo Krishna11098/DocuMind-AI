@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { addEmployee, getDepartments, getCurrentUser, User } from '@/lib/api';
+import { addEmployee, getDepartments, getCurrentUser, User, deleteEmployee } from '@/lib/api';
 
 interface Department {
   department_id: string;
@@ -27,6 +27,7 @@ export default function EmployeeManagement() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [adding, setAdding] = useState(false);
+  const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
 
   useEffect(() => {
     const checkAuthAndLoad = async () => {
@@ -90,6 +91,30 @@ export default function EmployeeManagement() {
       setError('An error occurred. Please try again.');
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleDeleteEmployee = async (employeeEmail: string, employeeName: string) => {
+    if (!confirm(`Are you sure you want to delete employee "${employeeName}"?`)) {
+      return;
+    }
+
+    setError('');
+    setMessage('');
+    setDeletingEmail(employeeEmail);
+
+    try {
+      const response = await deleteEmployee(employeeEmail);
+      if (response.success) {
+        setMessage(`Employee "${employeeName}" deleted successfully`);
+        await fetchDepartments();
+      } else {
+        setError(response.detail || 'Failed to delete employee');
+      }
+    } catch (err) {
+      setError('An error occurred while deleting the employee');
+    } finally {
+      setDeletingEmail(null);
     }
   };
 
@@ -217,7 +242,7 @@ export default function EmployeeManagement() {
           {departments.map((dept) => (
             <div key={dept.department_id} className="bg-white rounded-lg shadow-lg overflow-hidden">
               {/* Department Header */}
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6 text-white">
+              <div className="bg-linear-to-r from-blue-500 to-blue-600 p-6 text-white">
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="text-2xl font-bold">{dept.department_name}</h3>
@@ -242,7 +267,7 @@ export default function EmployeeManagement() {
                       >
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-bold">
+                            <div className="w-10 h-10 bg-linear-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white font-bold">
                               {employee.name.charAt(0).toUpperCase()}
                             </div>
                             <div>
@@ -251,11 +276,22 @@ export default function EmployeeManagement() {
                             </div>
                           </div>
                         </div>
-                        {employee.isAdmin && (
-                          <span className="px-3 py-1 ml-4 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full">
-                            ADMIN
-                          </span>
-                        )}
+                        <div className="flex items-center gap-3">
+                          {employee.isAdmin && (
+                            <span className="px-3 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full">
+                              ADMIN
+                            </span>
+                          )}
+                          {!employee.isAdmin && (
+                            <button
+                              onClick={() => handleDeleteEmployee(employee.email, employee.name)}
+                              disabled={deletingEmail === employee.email}
+                              className="px-3 py-1 bg-red-600 text-white text-xs font-semibold rounded hover:bg-red-700 transition disabled:opacity-50"
+                            >
+                              {deletingEmail === employee.email ? 'Deleting...' : 'Delete'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

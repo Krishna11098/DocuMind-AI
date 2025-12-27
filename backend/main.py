@@ -812,6 +812,132 @@ async def get_departments(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/delete-department/{department_id}")
+async def delete_department(request: Request, department_id: str):
+    """Delete a department and all its employees"""
+    try:
+        session = require_admin(request)
+        
+        # Get department
+        dept_ref = db.collection("departments").document(department_id)
+        dept = dept_ref.get()
+        
+        if not dept.exists:
+            raise HTTPException(status_code=404, detail="Department not found")
+        
+        dept_data = dept.to_dict()
+        
+        # Check if department belongs to admin's company
+        if dept_data["company_name"] != session["company_name"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        department_name = dept_data["department_name"]
+        
+        # Get all employees in this department
+        employees_query = db.collection("users").where(
+            "company_name", "==", session["company_name"]
+        ).where(
+            "department_name", "==", department_name
+        ).get()
+        
+        deleted_employees = []
+        
+        # Delete each employee in the department
+        for emp_doc in employees_query:
+            emp_data = emp_doc.to_dict()
+            employee_email = emp_data.get("email")
+            
+            # Also delete their personal document statuses
+            personal_docs = db.collection("personal_doc_status").where(
+                "employee_email", "==", employee_email
+            ).get()
+            
+            for personal_doc in personal_docs:
+                personal_doc.reference.delete()
+            
+            # Delete the employee
+            emp_doc.reference.delete()
+            deleted_employees.append(employee_email)
+        
+        # Delete the department
+        dept_ref.delete()
+        
+        return {
+            "success": True,
+            "message": f"Department '{department_name}' deleted successfully",
+            "deleted_employees_count": len(deleted_employees),
+            "deleted_employees": deleted_employees
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/delete-employee/{employee_email}")
+async def delete_employee(request: Request, employee_email: str):
+    """Delete a specific employee"""
+    try:
+        session = require_admin(request)
+        
+        # Get employee
+        employee_query = db.collection("users").where(
+            "email", "==", employee_email
+        ).where(
+            "company_name", "==", session["company_name"]
+        ).get()
+        
+        if not employee_query:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        employee_doc = employee_query[0]
+        emp_data = employee_doc.to_dict()
+        
+        # Check if trying to delete another admin
+        if emp_data.get("isAdmin", False):
+            raise HTTPException(status_code=403, detail="Cannot delete admin users")
+        
+        employee_name = emp_data.get("name", "")
+        department_name = emp_data.get("department_name", "")
+        
+        # Delete all personal document statuses for this employee
+        personal_docs = db.collection("personal_doc_status").where(
+            "employee_email", "==", employee_email
+        ).get()
+        
+        for personal_doc in personal_docs:
+            personal_doc.reference.delete()
+        
+        # Remove employee from docs_received in documents collection
+        documents = db.collection("documents").where(
+            "company_name", "==", session["company_name"]
+        ).get()
+        
+        for doc in documents:
+            doc_data = doc.to_dict()
+            docs_received = doc_data.get("docs_received", [])
+            if employee_email in docs_received:
+                docs_received.remove(employee_email)
+                doc.reference.update({"docs_received": docs_received})
+        
+        # Delete the employee
+        employee_doc.reference.delete()
+        
+        return {
+            "success": True,
+            "message": f"Employee '{employee_name}' deleted successfully",
+            "employee_email": employee_email,
+            "employee_name": employee_name,
+            "department_name": department_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------------------------- DOCUMENT MANAGEMENT ROUTES ----------------------------
 
 @app.post("/upload-file/")
@@ -1220,6 +1346,57 @@ async def get_documents(request: Request):
         
         return {"documents": documents}
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/my-documents/")
+async def get_my_documents(request: Request):
+    """Get employee's assigned documents with their personal status"""
+    try:
+        session = require_auth(request)
+        
+        # Make sure it's not an admin
+        if session.get("isAdmin", False):
+            raise HTTPException(status_code=403, detail="Admins cannot access employee documents")
+        
+        # Get employee's document list
+        user_doc = db.collection("users").document(session["email"]).get()
+        if not user_doc.exists:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        user_data = user_doc.to_dict()
+        doc_ids = user_data.get("docs_received", [])
+        
+        documents = []
+        personal_doc_statuses = []
+        
+        if doc_ids:
+            # Get documents by IDs
+            for doc_id in doc_ids:
+                doc = db.collection("documents").document(doc_id).get()
+                if doc.exists:
+                    doc_data = doc.to_dict()
+                    documents.append(doc_data)
+            
+            # Get personal statuses for all documents
+            personal_status_query = db.collection("personal_doc_status").where(
+                "employee_email", "==", session["email"]
+            ).get()
+            
+            for personal_doc in personal_status_query:
+                personal_doc_statuses.append(personal_doc.to_dict())
+        
+        return {
+            "success": True,
+            "employee_name": user_data.get("name"),
+            "department_name": user_data.get("department_name"),
+            "documents": documents,
+            "personal_doc_statuses": personal_doc_statuses
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

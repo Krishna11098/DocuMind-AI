@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCurrentUser, User, createDepartment, getDepartments } from '@/lib/api';
+import { getCurrentUser, User, createDepartment, getDepartments, deleteDepartment } from '@/lib/api';
 
 interface Department {
   department_id: string;
@@ -26,6 +26,7 @@ export default function DepartmentManagement() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [creatingDept, setCreatingDept] = useState(false);
+  const [deletingDeptId, setDeletingDeptId] = useState<string | null>(null);
 
   useEffect(() => {
     const checkAuthAndLoad = async () => {
@@ -85,6 +86,30 @@ export default function DepartmentManagement() {
       setError('An error occurred. Please try again.');
     } finally {
       setCreatingDept(false);
+    }
+  };
+
+  const handleDeleteDepartment = async (departmentId: string, departmentName: string) => {
+    if (!confirm(`Are you sure you want to delete the department "${departmentName}" and all its employees?`)) {
+      return;
+    }
+
+    setError('');
+    setMessage('');
+    setDeletingDeptId(departmentId);
+
+    try {
+      const data = await deleteDepartment(departmentId);
+      if (data.success) {
+        setMessage(`Department "${departmentName}" deleted successfully (${data.deleted_employees_count} employees removed)`);
+        await fetchDepartments();
+      } else {
+        setError(data.detail || 'Failed to delete department');
+      }
+    } catch (err) {
+      setError('An error occurred while deleting the department');
+    } finally {
+      setDeletingDeptId(null);
     }
   };
 
@@ -180,9 +205,18 @@ export default function DepartmentManagement() {
                     <p className="text-gray-600 mt-1">{dept.description}</p>
                   )}
                 </div>
-                <span className="inline-block px-4 py-1 bg-blue-100 text-blue-600 rounded-full text-sm font-semibold">
-                  {dept.employee_count} {dept.employee_count === 1 ? 'Member' : 'Members'}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="inline-block px-4 py-1 bg-blue-100 text-blue-600 rounded-full text-sm font-semibold">
+                    {dept.employee_count} {dept.employee_count === 1 ? 'Member' : 'Members'}
+                  </span>
+                  <button
+                    onClick={() => handleDeleteDepartment(dept.department_id, dept.department_name)}
+                    disabled={deletingDeptId === dept.department_id}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium disabled:opacity-50 text-sm"
+                  >
+                    {deletingDeptId === dept.department_id ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
               </div>
 
               {/* Employees in Department */}

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import LoginModal from './LoginModal';
 import SignupModal from './SignupModal';
 import { logout, getCurrentUser, User } from '@/lib/api';
@@ -10,6 +12,7 @@ export default function Navbar() {
   const [showSignup, setShowSignup] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     checkAuth();
@@ -41,21 +44,33 @@ export default function Navbar() {
   const handleLoginSuccess = (userData: User) => {
     setUser(userData);
     setShowLogin(false);
+    if (userData.isAdmin) {
+      router.push('/admin');
+    } else {
+      router.push('/employee');
+    }
   };
 
   const handleSignupSuccess = (userData: User) => {
     setUser(userData);
     setShowSignup(false);
+    if (userData.isAdmin) {
+      router.push('/admin');
+    } else {
+      router.push('/employee');
+    }
   };
 
   return (
     <>
-      <nav className="bg-gradient-to-r from-blue-600 to-blue-800 text-white shadow-lg">
+      <nav className="bg-linear-to-r from-blue-600 to-blue-800 text-white shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center">
-              <h1 className="text-2xl font-bold">DocuMind AI</h1>
+              <Link href="/" className="text-2xl font-bold hover:text-blue-200 transition">
+                DocuMind AI
+              </Link>
             </div>
 
             {/* Navigation Links */}
@@ -69,9 +84,24 @@ export default function Navbar() {
               
               {/* Admin Only Links */}
               {user && user.isAdmin && (
-                <a href="/admin" className="hover:text-blue-200 transition font-medium">
-                  Admin Dashboard
-                </a>
+                <>
+                  <a href="/admin" className="hover:text-blue-200 transition font-medium">
+                    Admin Dashboard
+                  </a>
+                  <a href="/documents" className="hover:text-blue-200 transition font-medium">
+                    Documents
+                  </a>
+                  <a href="/text-analyzer" className="hover:text-blue-200 transition font-medium">
+                    Text Analyzer
+                  </a>
+                </>
+              )}
+
+              {/* Employee Links */}
+              {user && !user.isAdmin && (
+                <Link href="/employee" className="hover:text-blue-200 transition font-medium">
+                  My Dashboard
+                </Link>
               )}
               
               <a href="#contact" className="hover:text-blue-200 transition">

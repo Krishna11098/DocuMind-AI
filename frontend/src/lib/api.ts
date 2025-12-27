@@ -128,6 +128,14 @@ export async function getDepartments() {
   return response.json();
 }
 
+export async function deleteDepartment(departmentId: string) {
+  const response = await fetch(`${API_BASE_URL}/delete-department/${departmentId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  return response.json();
+}
+
 // Employee Management
 export async function addEmployee(data: {
   name: string;
@@ -139,6 +147,14 @@ export async function addEmployee(data: {
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify(data),
+  });
+  return response.json();
+}
+
+export async function deleteEmployee(employeeEmail: string) {
+  const response = await fetch(`${API_BASE_URL}/delete-employee/${encodeURIComponent(employeeEmail)}`, {
+    method: 'DELETE',
+    credentials: 'include',
   });
   return response.json();
 }
