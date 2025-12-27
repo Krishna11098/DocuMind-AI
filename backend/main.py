@@ -2,7 +2,7 @@
 
 
 # main.py - Complete corrected version
-from fastapi import FastAPI, HTTPException, Request, Depends, Form
+from fastapi import FastAPI, HTTPException, Request, Depends, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -86,6 +86,9 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "true").lower() == "true"
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "false").lower() == "true"
 SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "10"))
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+RESEND_FROM = os.getenv("RESEND_FROM", "onboarding@resend.dev")  # default works for dev
+RESEND_API_URL = "https://api.resend.com/emails"
 
 
 
@@ -175,61 +178,76 @@ def generate_password(length=8):
     chars = string.ascii_letters + string.digits + "!@#$%^&*"
     return ''.join(random.choice(chars) for _ in range(length))
 
+def _send_via_resend(receiver_email: str, subject: str, html_body: str, text_body: str):
+    if not RESEND_API_KEY or not RESEND_FROM:
+        raise RuntimeError("Resend not configured: RESEND_API_KEY or RESEND_FROM missing")
+
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "from": RESEND_FROM,
+        "to": receiver_email,
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+    }
+    resp = requests.post(RESEND_API_URL, headers=headers, json=payload, timeout=10)
+    if resp.status_code >= 300:
+        raise RuntimeError(f"Resend error {resp.status_code}: {resp.text}")
+
+def _send_via_smtp(receiver_email: str, subject: str, text_body: str):
+    sender_email = EMAIL_SENDER or ""
+    sender_password = EMAIL_PASSWORD or ""
+
+    if not sender_email or not sender_password:
+        raise RuntimeError("Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
+
+    msg = EmailMessage()
+    msg.set_content(text_body)
+    msg['Subject'] = subject
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+
+    if SMTP_USE_SSL:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+            if SMTP_USE_TLS:
+                server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+
 def send_email(receiver_email, password):
-    """Send account credentials via SMTP using configured sender"""
+    """Send account credentials via Resend if configured, otherwise SMTP."""
+    subject = "Your Account Credentials"
+    text_body = f"Your account has been created.\nEmail: {receiver_email}\nPassword: {password}"
+    html_body = f"<p>Your account has been created.</p><p>Email: {receiver_email}<br>Password: {password}</p>"
+
     try:
-        sender_email = EMAIL_SENDER or ""
-        sender_password = EMAIL_PASSWORD or ""
-
-        if not sender_email or not sender_password:
-            raise RuntimeError("Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
-
-        msg = EmailMessage()
-        msg.set_content(f"Your account has been created.\nEmail: {receiver_email}\nPassword: {password}")
-        msg['Subject'] = 'Your Account Credentials'
-        msg['From'] = sender_email
-        msg['To'] = receiver_email
-
-        if SMTP_USE_SSL:
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
+        if RESEND_API_KEY and RESEND_FROM:
+            _send_via_resend(receiver_email, subject, html_body, text_body)
         else:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-                if SMTP_USE_TLS:
-                    server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
+            _send_via_smtp(receiver_email, subject, text_body)
         print(f"✅ Email sent to {receiver_email}")
     except Exception as e:
         print(f"❌ Error sending email: {e}")
         raise RuntimeError(f"Send email failed: {e}")
 
 def send_otp_email(receiver_email, otp):
-    """Send OTP via Gmail SMTP"""
+    """Send OTP via Resend if configured, otherwise SMTP."""
+    subject = "Your OTP Code"
+    text_body = f"Your OTP is: {otp}\n\nThis OTP is valid for 5 minutes."
+    html_body = f"<p>Your OTP is: <strong>{otp}</strong></p><p>This OTP is valid for 5 minutes.</p>"
+
     try:
-        sender_email = EMAIL_SENDER or ""
-        sender_password = EMAIL_PASSWORD or ""
-
-        if not sender_email or not sender_password:
-            raise RuntimeError("Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
-
-        msg = EmailMessage()
-        msg.set_content(f"Your OTP is: {otp}\n\nThis OTP is valid for 5 minutes.")
-        msg['Subject'] = 'Your OTP Code'
-        msg['From'] = sender_email
-        msg['To'] = receiver_email
-
-        if SMTP_USE_SSL:
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
+        if RESEND_API_KEY and RESEND_FROM:
+            _send_via_resend(receiver_email, subject, html_body, text_body)
         else:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-                if SMTP_USE_TLS:
-                    server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
+            _send_via_smtp(receiver_email, subject, text_body)
         print(f"✅ OTP sent to {receiver_email}")
     except Exception as e:
         print(f"❌ Error sending OTP: {e}")
@@ -415,7 +433,7 @@ def require_auth(request: Request):
 # ---------------------------- AUTH ROUTES ----------------------------
 
 @app.post("/signup/")
-async def signup(request: Request, user: UserSignup):
+async def signup(request: Request, user: UserSignup, background_tasks: BackgroundTasks):
     """Step 1: Start signup process by sending OTP"""
     try:
         # Check if user already exists
@@ -426,11 +444,8 @@ async def signup(request: Request, user: UserSignup):
         # Generate OTP
         otp = ''.join(random.choices(string.digits, k=6))
         
-        # # Send OTP email
-        # send_otp_email(user.email, otp)
-
-        # Send OTP email
-        send_otp_email(user.email, otp)
+        # Send OTP email asynchronously so the response is not blocked
+        background_tasks.add_task(send_otp_email, user.email, otp)
         
         # Store OTP and user data in session for verification
         request.session["signup_otp"] = otp
@@ -545,7 +560,7 @@ async def verify_signup_otp(request: Request, otp_data: OtpVerification):
         raise HTTPException(status_code=500, detail=f"Failed to verify OTP: {str(e)}")
 
 @app.post("/resend-signup-otp/")
-async def resend_signup_otp(request: Request):
+async def resend_signup_otp(request: Request, background_tasks: BackgroundTasks):
     """Resend OTP for signup verification"""
     try:
         # Check if user data exists in session
@@ -557,11 +572,8 @@ async def resend_signup_otp(request: Request):
         # Generate new OTP
         new_otp = ''.join(random.choices(string.digits, k=6))
         
-        # # Send OTP email
-        # send_otp_email(user_data["email"], new_otp)
-
-        # Send OTP email
-        send_otp_email(user_data["email"], new_otp)
+        # Send OTP email asynchronously so the response is not blocked
+        background_tasks.add_task(send_otp_email, user_data["email"], new_otp)
         
         # Update session with new OTP
         request.session["signup_otp"] = new_otp
@@ -668,7 +680,7 @@ async def get_me(request: Request):
 # ---------------------------- FORGOT PASSWORD ROUTES ----------------------------
 
 @app.post("/forgot-password/")
-async def forgot_password(request: Request, email_data: UserForgotPassword):
+async def forgot_password(request: Request, email_data: UserForgotPassword, background_tasks: BackgroundTasks):
     """Send OTP for password reset"""
     try:
         email = email_data.email
@@ -688,8 +700,8 @@ async def forgot_password(request: Request, email_data: UserForgotPassword):
         # Generate OTP
         otp = ''.join(random.choices(string.digits, k=6))
         
-        # Send OTP email
-        send_otp_email(email, otp)
+        # Send OTP email asynchronously so the response is not blocked
+        background_tasks.add_task(send_otp_email, email, otp)
         
         # Store OTP in session
         request.session["reset_password_otp"] = otp
@@ -762,7 +774,7 @@ async def reset_password(request: Request, reset_data: UserResetPassword):
 # ---------------------------- ADMIN ROUTES ----------------------------
 
 @app.post("/add-employee/")
-async def add_employee(request: Request, employee: EmployeeCreate):
+async def add_employee(request: Request, employee: EmployeeCreate, background_tasks: BackgroundTasks):
     """Admin-only: Add employee to same company"""
     try:
         # Check if user is logged in
@@ -788,11 +800,8 @@ async def add_employee(request: Request, employee: EmployeeCreate):
         )
         emp_ref.set(user_data.dict())
 
-        # # Send password to employee email
-        # send_email(employee.email, random_pw)
-
-        # Send password to employee email
-        send_email(employee.email, random_pw)
+        # Send password to employee email asynchronously so the response is not blocked
+        background_tasks.add_task(send_email, employee.email, random_pw)
 
         return {
             "success": True,
