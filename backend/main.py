@@ -46,7 +46,15 @@ load_dotenv()
 # Load configuration from environment
 SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "supersecretkey123")
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "false").lower() == "true"
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:5173,https://docu-mind-ai-ebon.vercel.app"
+    ).split(",")
+    if o.strip()
+]
+
 
 # Cloudinary and Gemini API keys
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
