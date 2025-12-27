@@ -73,6 +73,17 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 app = FastAPI()
 
+# ✅ Add session middleware FIRST (before CORS)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    same_site=SESSION_SAME_SITE,  # "none" for cross-origin (Railway), "lax" for same-origin
+    https_only=SESSION_HTTPS_ONLY,  # True for production (Railway), False for localhost
+    max_age=86400,
+    session_cookie="session",
+    domain=None,  # Allow cross-origin cookies
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -84,17 +95,6 @@ app.add_middleware(
 def guess_mime(file_url):
     mime, _ = mimetypes.guess_type(file_url)
     return mime or "image/png"
-
-# ✅ Add session middleware with better configuration
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET_KEY,
-    same_site=SESSION_SAME_SITE,  # "none" for cross-origin (Railway), "lax" for same-origin
-    https_only=SESSION_HTTPS_ONLY,  # True for production (Railway), False for localhost
-    max_age=86400,
-    session_cookie="session",
-    domain=None,  # Allow cross-origin cookies
-)
 
 
 
@@ -524,8 +524,10 @@ async def login(request: Request, user: UserLogin):
         request.session["company_name"] = user_data.get("company_name")
         request.session["name"] = user_data.get("name")
         request.session["department_name"] = user_data.get("department_name")
+        
+        print(f"Login - Session set: {dict(request.session)}")  # Debug log
 
-        return {
+        response = JSONResponse({
             "success": True,
             "message": "Login successful",
             "user": {
@@ -535,7 +537,9 @@ async def login(request: Request, user: UserLogin):
                 "isAdmin": user_data.get("isAdmin", False),
                 "department_name": user_data.get("department_name")
             }
-        }
+        })
+        
+        return response
 
     except HTTPException:
         raise
@@ -556,6 +560,9 @@ async def logout(request: Request):
 async def get_me(request: Request):
     """Return currently logged-in user info"""
     try:
+        print(f"Session data: {dict(request.session)}")  # Debug log
+        print(f"Cookies: {request.cookies}")  # Debug log
+        
         if "email" not in request.session:
             raise HTTPException(status_code=401, detail="Not authenticated")
 
