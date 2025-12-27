@@ -1,0 +1,41 @@
+# Core backend
+fastapi
+uvicorn[standard]
+
+# Environment variables
+python-dotenv
+
+# Firebase
+firebase-admin
+
+# Auth / sessions
+itsdangerous
+
+# CORS & middleware (pulled automatically but kept explicit)
+starlette
+
+# File uploads & forms
+python-multipart
+
+
+
+# Email
+email-validator
+
+# Cloudinary
+cloudinary
+
+# HTTP requests
+requests
+
+# Google Gemini AI
+google-generativeai
+
+# Image & PDF processing
+Pillow
+PyPDF2
+PyMuPDF
+pdfplumber
+
+# Utilities
+python-dateutil
