@@ -57,6 +57,14 @@ CORS_ORIGINS = [
     if o.strip()
 ]
 
+# Debug: Print CORS origins on startup
+print("=" * 50)
+print("🔧 CORS Configuration:")
+print(f"   Allowed Origins: {CORS_ORIGINS}")
+print(f"   Session SameSite: {SESSION_SAME_SITE}")
+print(f"   Session HTTPS Only: {SESSION_HTTPS_ONLY}")
+print("=" * 50)
+
 
 # Cloudinary and Gemini API keys
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
@@ -97,18 +105,19 @@ app.add_middleware(
 async def fix_cookie_middleware(request: Request, call_next):
     response = await call_next(request)
     
-    # Fix Set-Cookie header for cross-origin
+    # Fix Set-Cookie header for cross-origin WITHOUT breaking CORS
     if "set-cookie" in response.headers:
         cookies = response.headers.getlist("set-cookie")
-        response.headers._list = [
-            (k, v) for k, v in response.headers._list if k.lower() != "set-cookie"
-        ]
+        # Remove old set-cookie headers
+        new_headers = [(k, v) for k, v in response.headers._list if k.lower() != "set-cookie"]
+        response.headers._list = new_headers
+        
+        # Re-add cookies with proper attributes
         for cookie in cookies:
-            # Ensure SameSite=None and Secure are set
             if "session=" in cookie:
-                # Remove existing SameSite and Secure if present
+                # Extract just the session value
                 cookie = cookie.split(";")[0]
-                # Add proper attributes
+                # Add proper attributes for cross-origin
                 cookie += "; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=86400"
             response.headers.append("set-cookie", cookie)
     
