@@ -146,8 +146,15 @@ cloudinary.config(
 
 GENAI_API_KEY = os.getenv("GENAI_API_KEY")
 
+# Initialize Gemini model
+model = None
 if GENAI_API_KEY:
     genai.configure(api_key=GENAI_API_KEY)
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+    except Exception as e:
+        print(f"Failed to initialize Gemini model: {e}")
+        model = None
     model = genai.GenerativeModel("gemini-1.5-flash")
 else:
     model = None
@@ -263,10 +270,7 @@ def analyze_document_with_gemini(file_url, file_type):
                 {text_content[:5000]}
                 """
 
-                result = client.models.generate_content(
-                    model="models/gemini-2.5-flash",
-                    contents=prompt
-                )
+                result = model.generate_content(prompt)
                 return parse_gemini_response(result.text)
 
             # ---------- SCANNED PDF (NO TEXT) ----------
@@ -299,10 +303,7 @@ def analyze_document_with_gemini(file_url, file_type):
             departments_responsible, confidence.
             """
 
-            result = client.models.generate_content(
-                model="models/gemini-2.5-flash-image",
-                contents=[*parts, prompt]
-            )
+            result = model.generate_content([*parts, prompt])
 
             return parse_gemini_response(result.text)
 
@@ -331,10 +332,7 @@ def analyze_document_with_gemini(file_url, file_type):
             departments_responsible, confidence.
             """
 
-            result = client.models.generate_content(
-                model="models/gemini-2.5-flash-image",
-                contents=[image_part, prompt]
-            )
+            result = model.generate_content([image_part, prompt])
 
             return parse_gemini_response(result.text)
 
@@ -1045,7 +1043,7 @@ async def analyze_text(request: Request, text: str = Form(...)):
     try:
         session = require_admin(request)
         
-        if not client:
+        if not model:
             raise HTTPException(status_code=500, detail="Gemini API not configured")
         
         prompt = f"""
@@ -1064,10 +1062,7 @@ async def analyze_text(request: Request, text: str = Form(...)):
         Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
         """
         
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=prompt
-        )
+        response = model.generate_content(prompt)
         # Parse the response to extract JSON
         analysis = parse_gemini_response(response.text)
         return analysis
@@ -1124,10 +1119,7 @@ async def create_text_document(
             """
             
             try:
-                response = client.models.generate_content(
-                    model='gemini-2.0-flash',
-                    contents=prompt
-                )
+                response = model.generate_content(prompt)
                 analysis = parse_gemini_response(response.text)
                 
                 # Update document with analysis results
@@ -1210,10 +1202,7 @@ async def analyze_document(request: Request, analyze_request: AnalyzeDocumentReq
             Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
             """
             
-            response = client.models.generate_content(
-                model='gemini-2.0-flash',
-                contents=prompt
-            )
+            response = model.generate_content(prompt)
             analysis_data = parse_gemini_response(response.text)
         else:
             # Analyze file document
