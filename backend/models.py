@@ -36,6 +36,7 @@ class EmployeeCreate(BaseModel):
     name: str
     email: EmailStr
     department_name: str
+    password: str
 
 class OtpVerification(BaseModel):
     email: EmailStr

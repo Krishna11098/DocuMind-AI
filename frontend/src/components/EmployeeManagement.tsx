@@ -23,6 +23,7 @@ export default function EmployeeManagement() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -74,12 +75,14 @@ export default function EmployeeManagement() {
         name,
         email,
         department_name: selectedDepartment,
+        password,
       });
 
       if (response.success) {
-        setMessage(`Employee ${name} added successfully! Password sent to ${email}`);
+        setMessage(`Employee ${name} added successfully!`);
         setName('');
         setEmail('');
+        setPassword('');
         setSelectedDepartment('');
         setShowAddForm(false);
         // Refresh departments to see updated employee count
@@ -211,9 +214,21 @@ export default function EmployeeManagement() {
               )}
             </div>
 
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <p className="text-sm text-blue-700">
-                <strong>ℹ️ Note:</strong> A password will be auto-generated and sent to the employee's email address.
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
+                placeholder="Enter password for employee"
+                required
+                minLength={6}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Minimum 6 characters
               </p>
             </div>
 

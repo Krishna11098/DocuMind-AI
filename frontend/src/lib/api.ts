@@ -33,26 +33,6 @@ export async function signup(data: {
   return response.json();
 }
 
-// Verify OTP
-export async function verifySignupOtp(data: { email: string; otp: string }) {
-  const response = await fetch(`${API_BASE_URL}/verify-signup-otp/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  return response.json();
-}
-
-// Resend OTP
-export async function resendSignupOtp() {
-  const response = await fetch(`${API_BASE_URL}/resend-signup-otp/`, {
-    method: 'POST',
-    credentials: 'include',
-  });
-  return response.json();
-}
-
 // Login
 export async function login(data: { email: string; password: string }) {
   const response = await fetch(`${API_BASE_URL}/login/`, {
@@ -82,31 +62,7 @@ export async function getCurrentUser(signal?: AbortSignal): Promise<ApiResponse<
   return response.json();
 }
 
-// Forgot password
-export async function forgotPassword(email: string) {
-  const response = await fetch(`${API_BASE_URL}/forgot-password/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ email }),
-  });
-  return response.json();
-}
-
-// Reset password
-export async function resetPassword(data: {
-  email: string;
-  otp: string;
-  new_password: string;
-}) {
-  const response = await fetch(`${API_BASE_URL}/reset-password/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  return response.json();
-}
+// Forgot/reset password removed - users contact admin
 
 // Department Management
 export async function createDepartment(data: {
@@ -142,6 +98,7 @@ export async function addEmployee(data: {
   name: string;
   email: string;
   department_name: string;
+  password: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/add-employee/`, {
     method: 'POST',

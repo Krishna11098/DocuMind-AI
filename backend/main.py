@@ -17,9 +17,7 @@ from models import (UserSignup, User, EmployeeCreate, UserLogin,
 import hashlib
 import random
 import string
-import smtplib
 from typing import List, Optional
-from email.message import EmailMessage
 from fastapi import UploadFile, File
 import uuid
 from datetime import datetime, timezone
@@ -77,18 +75,6 @@ CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 # Accept either GENAI_API_KEY or GOOGLE_API_KEY
 GENAI_API_KEY = os.getenv("GENAI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-
-# Email configuration
-EMAIL_SENDER = os.getenv("EMAIL_SENDER")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "true").lower() == "true"
-SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "false").lower() == "true"
-SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "10"))
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-RESEND_FROM = os.getenv("RESEND_FROM", "onboarding@resend.dev")  # default works for dev
-RESEND_API_URL = "https://api.resend.com/emails"
 
 
 
@@ -174,84 +160,7 @@ else:
 
 
 # ---------------------------- UTIL FUNCTIONS ----------------------------
-def generate_password(length=8):
-    chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    return ''.join(random.choice(chars) for _ in range(length))
-
-def _send_via_resend(receiver_email: str, subject: str, html_body: str, text_body: str):
-    if not RESEND_API_KEY or not RESEND_FROM:
-        raise RuntimeError("Resend not configured: RESEND_API_KEY or RESEND_FROM missing")
-
-    headers = {
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "from": RESEND_FROM,
-        "to": receiver_email,
-        "subject": subject,
-        "html": html_body,
-        "text": text_body,
-    }
-    resp = requests.post(RESEND_API_URL, headers=headers, json=payload, timeout=10)
-    if resp.status_code >= 300:
-        raise RuntimeError(f"Resend error {resp.status_code}: {resp.text}")
-
-def _send_via_smtp(receiver_email: str, subject: str, text_body: str):
-    sender_email = EMAIL_SENDER or ""
-    sender_password = EMAIL_PASSWORD or ""
-
-    if not sender_email or not sender_password:
-        raise RuntimeError("Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
-
-    msg = EmailMessage()
-    msg.set_content(text_body)
-    msg['Subject'] = subject
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-
-    if SMTP_USE_SSL:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-    else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-            if SMTP_USE_TLS:
-                server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-
-def send_email(receiver_email, password):
-    """Send account credentials via Resend if configured, otherwise SMTP."""
-    subject = "Your Account Credentials"
-    text_body = f"Your account has been created.\nEmail: {receiver_email}\nPassword: {password}"
-    html_body = f"<p>Your account has been created.</p><p>Email: {receiver_email}<br>Password: {password}</p>"
-
-    try:
-        if RESEND_API_KEY and RESEND_FROM:
-            _send_via_resend(receiver_email, subject, html_body, text_body)
-        else:
-            _send_via_smtp(receiver_email, subject, text_body)
-        print(f"✅ Email sent to {receiver_email}")
-    except Exception as e:
-        print(f"❌ Error sending email: {e}")
-        raise RuntimeError(f"Send email failed: {e}")
-
-def send_otp_email(receiver_email, otp):
-    """Send OTP via Resend if configured, otherwise SMTP."""
-    subject = "Your OTP Code"
-    text_body = f"Your OTP is: {otp}\n\nThis OTP is valid for 5 minutes."
-    html_body = f"<p>Your OTP is: <strong>{otp}</strong></p><p>This OTP is valid for 5 minutes.</p>"
-
-    try:
-        if RESEND_API_KEY and RESEND_FROM:
-            _send_via_resend(receiver_email, subject, html_body, text_body)
-        else:
-            _send_via_smtp(receiver_email, subject, text_body)
-        print(f"✅ OTP sent to {receiver_email}")
-    except Exception as e:
-        print(f"❌ Error sending OTP: {e}")
-        raise RuntimeError(f"Send OTP failed: {e}")
+# No email functionality needed
 
 def extract_text_from_pdf(file_url):
     """Extract text from PDF file"""
@@ -433,164 +342,55 @@ def require_auth(request: Request):
 # ---------------------------- AUTH ROUTES ----------------------------
 
 @app.post("/signup/")
-async def signup(request: Request, user: UserSignup, background_tasks: BackgroundTasks):
-    """Step 1: Start signup process by sending OTP"""
+async def signup(request: Request, user: UserSignup):
+    """Direct signup without OTP verification"""
     try:
         # Check if user already exists
         doc_ref = db.collection("users").document(user.email)
         if doc_ref.get().exists:
             raise HTTPException(status_code=400, detail="Email already exists")
         
-        # Generate OTP
-        otp = ''.join(random.choices(string.digits, k=6))
-        
-        # Send OTP email asynchronously so the response is not blocked
-        background_tasks.add_task(send_otp_email, user.email, otp)
-        
-        # Store OTP and user data in session for verification
-        request.session["signup_otp"] = otp
-        request.session["signup_user"] = {
-            "name": user.name,
-            "email": user.email,
-            "password": user.password,  # Store plain password for now
-            "company_name": user.company_name,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Set OTP expiry (5 minutes from now)
-        request.session["signup_otp_expiry"] = datetime.now().timestamp() + 300
-        request.session["signup_failed_attempts"] = 0
-        
-        return {
-            "success": True,
-            "message": "OTP sent to email. Please verify to complete signup.",
-            "email": user.email
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Signup error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start signup: {str(e)}")
-
-@app.post("/verify-signup-otp/")
-async def verify_signup_otp(request: Request, otp_data: OtpVerification):
-    """Step 2: Verify OTP and create user account"""
-    try:
-        # Check if OTP exists in session
-        if "signup_otp" not in request.session or "signup_user" not in request.session:
-            raise HTTPException(status_code=400, detail="Signup session expired or not found")
-        
-        # Check OTP expiry
-        expiry_time = request.session.get("signup_otp_expiry")
-        if expiry_time and datetime.now().timestamp() > expiry_time:
-            # Clear expired session
-            request.session.clear()
-            raise HTTPException(status_code=400, detail="OTP has expired. Please start signup again.")
-        
-        # Verify OTP
-        stored_otp = request.session.get("signup_otp")
-        if stored_otp != otp_data.otp:
-            # Increment failed attempts counter
-            failed_attempts = request.session.get("signup_failed_attempts", 0) + 1
-            request.session["signup_failed_attempts"] = failed_attempts
-            
-            if failed_attempts >= 3:
-                # Clear session after too many failed attempts
-                request.session.clear()
-                raise HTTPException(status_code=400, detail="Too many failed attempts. Please start signup again.")
-            
-            raise HTTPException(status_code=400, detail="Invalid OTP")
-        
-        # Get user data from session
-        user_data = request.session.get("signup_user")
-        if not user_data:
-            raise HTTPException(status_code=400, detail="User data not found in session")
-        
-        # Verify email matches
-        if user_data["email"] != otp_data.email:
-            raise HTTPException(status_code=400, detail="Email mismatch")
-        
-        # Check if user was created in the meantime
-        doc_ref = db.collection("users").document(otp_data.email)
-        if doc_ref.get().exists:
-            raise HTTPException(status_code=400, detail="User already exists")
-        
         # Hash password
-        hashed_pw = hashlib.sha256(user_data["password"].encode()).hexdigest()
+        hashed_pw = hashlib.sha256(user.password.encode()).hexdigest()
         
         # Create user in database
-        user = User(
-            name=user_data["name"],
-            email=user_data["email"],
+        new_user = User(
+            name=user.name,
+            email=user.email,
             password=hashed_pw,
             department_name=None,
-            company_name=user_data["company_name"],
+            company_name=user.company_name,
             isAdmin=True,
             departments=[]  # Initialize empty departments list for admin
         )
         
         # Save to database
-        doc_ref.set(user.dict())
-        
-        # Clear session data
-        request.session.clear()
+        doc_ref.set(new_user.dict())
         
         # Create session for immediate login
-        request.session["email"] = user.email
+        request.session["email"] = new_user.email
         request.session["isAdmin"] = True
-        request.session["company_name"] = user.company_name
-        request.session["name"] = user.name
+        request.session["company_name"] = new_user.company_name
+        request.session["name"] = new_user.name
         
         return {
             "success": True,
             "message": "Signup successful! Account created.",
             "user": {
-                "name": user.name,
-                "email": user.email,
-                "company_name": user.company_name,
-                "isAdmin": user.isAdmin
+                "name": new_user.name,
+                "email": new_user.email,
+                "company_name": new_user.company_name,
+                "isAdmin": new_user.isAdmin
             }
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"OTP verification error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to verify OTP: {str(e)}")
+        print(f"Signup error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to signup: {str(e)}")
 
-@app.post("/resend-signup-otp/")
-async def resend_signup_otp(request: Request, background_tasks: BackgroundTasks):
-    """Resend OTP for signup verification"""
-    try:
-        # Check if user data exists in session
-        if "signup_user" not in request.session:
-            raise HTTPException(status_code=400, detail="No signup in progress")
-        
-        user_data = request.session.get("signup_user")
-        
-        # Generate new OTP
-        new_otp = ''.join(random.choices(string.digits, k=6))
-        
-        # Send OTP email asynchronously so the response is not blocked
-        background_tasks.add_task(send_otp_email, user_data["email"], new_otp)
-        
-        # Update session with new OTP
-        request.session["signup_otp"] = new_otp
-        request.session["signup_otp_expiry"] = datetime.now().timestamp() + 300  # 5 minutes
-        request.session["signup_failed_attempts"] = 0  # Reset failed attempts
-        
-        return {
-            "success": True,
-            "message": "New OTP sent to your email",
-            "email": user_data["email"]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Resend OTP error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to resend OTP: {str(e)}")
+# OTP endpoints removed - direct signup now
 
 @app.post("/login/")
 async def login(request: Request, user: UserLogin):
@@ -677,104 +477,12 @@ async def get_me(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ---------------------------- FORGOT PASSWORD ROUTES ----------------------------
-
-@app.post("/forgot-password/")
-async def forgot_password(request: Request, email_data: UserForgotPassword, background_tasks: BackgroundTasks):
-    """Send OTP for password reset"""
-    try:
-        email = email_data.email
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required")
-        
-        # Check if user exists
-        doc_ref = db.collection("users").document(email)
-        doc = doc_ref.get()
-        if not doc.exists:
-            # Don't reveal that user doesn't exist for security
-            return {
-                "success": True,
-                "message": "If an account exists with this email, you will receive an OTP"
-            }
-        
-        # Generate OTP
-        otp = ''.join(random.choices(string.digits, k=6))
-        
-        # Send OTP email asynchronously so the response is not blocked
-        background_tasks.add_task(send_otp_email, email, otp)
-        
-        # Store OTP in session
-        request.session["reset_password_otp"] = otp
-        request.session["reset_password_email"] = email
-        request.session["reset_password_otp_expiry"] = datetime.now().timestamp() + 300
-        
-        return {
-            "success": True,
-            "message": "OTP sent to email"
-        }
-        
-    except Exception as e:
-        print(f"Forgot password error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/reset-password/")
-async def reset_password(request: Request, reset_data: UserResetPassword):
-    """Reset password with OTP verification"""
-    try:
-        email = reset_data.email
-        otp = reset_data.otp
-        new_password = reset_data.new_password
-        
-        if not all([email, otp, new_password]):
-            raise HTTPException(status_code=400, detail="Email, OTP and new password are required")
-        
-        # Check OTP in session
-        stored_otp = request.session.get("reset_password_otp")
-        stored_email = request.session.get("reset_password_email")
-        expiry_time = request.session.get("reset_password_otp_expiry")
-        
-        if not stored_otp or not stored_email:
-            raise HTTPException(status_code=400, detail="OTP session expired")
-        
-        if datetime.now().timestamp() > expiry_time:
-            request.session.pop("reset_password_otp", None)
-            request.session.pop("reset_password_email", None)
-            request.session.pop("reset_password_otp_expiry", None)
-            raise HTTPException(status_code=400, detail="OTP has expired")
-        
-        if stored_otp != otp or stored_email != email:
-            raise HTTPException(status_code=400, detail="Invalid OTP")
-        
-        # Hash new password
-        hashed_pw = hashlib.sha256(new_password.encode()).hexdigest()
-        
-        # Update password in database
-        doc_ref = db.collection("users").document(email)
-        if not doc_ref.get().exists:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        doc_ref.update({"password": hashed_pw})
-        
-        # Clear session
-        request.session.pop("reset_password_otp", None)
-        request.session.pop("reset_password_email", None)
-        request.session.pop("reset_password_otp_expiry", None)
-        
-        return {
-            "success": True,
-            "message": "Password reset successfully"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Reset password error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Forgot/reset password removed - users contact admin for password reset
 
 # ---------------------------- ADMIN ROUTES ----------------------------
 
 @app.post("/add-employee/")
-async def add_employee(request: Request, employee: EmployeeCreate, background_tasks: BackgroundTasks):
+async def add_employee(request: Request, employee: EmployeeCreate):
     """Admin-only: Add employee to same company"""
     try:
         # Check if user is logged in
@@ -785,9 +493,8 @@ async def add_employee(request: Request, employee: EmployeeCreate, background_ta
         if emp_ref.get().exists:
             raise HTTPException(status_code=400, detail="Employee already exists")
 
-        # Generate and hash password
-        random_pw = generate_password()
-        hashed_pw = hashlib.sha256(random_pw.encode()).hexdigest()
+        # Hash the password provided by admin
+        hashed_pw = hashlib.sha256(employee.password.encode()).hexdigest()
 
         # Create employee record
         user_data = User(
@@ -800,13 +507,9 @@ async def add_employee(request: Request, employee: EmployeeCreate, background_ta
         )
         emp_ref.set(user_data.dict())
 
-        # Send password to employee email asynchronously so the response is not blocked
-        background_tasks.add_task(send_email, employee.email, random_pw)
-
         return {
             "success": True,
-            "message": f"Employee {employee.name} added successfully",
-            "password_sent": True
+            "message": f"Employee {employee.name} added successfully"
         }
 
     except HTTPException:
