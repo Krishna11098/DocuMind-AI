@@ -46,11 +46,12 @@ load_dotenv()
 # Load configuration from environment
 SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "supersecretkey123")
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "false").lower() == "true"
+SESSION_SAME_SITE = os.getenv("SESSION_SAME_SITE", "none")  # none for cross-origin, lax for same-origin
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://localhost:5173,https://docu-mind-ai-ebon.vercel.app"
+        "http://localhost:3000,http://localhost:5173,https://docu-mind-ai-ebon.vercel.app,https://docu-mind-ai.vercel.app"
     ).split(",")
     if o.strip()
 ]
@@ -72,6 +73,14 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 def guess_mime(file_url):
     mime, _ = mimetypes.guess_type(file_url)
     return mime or "image/png"
@@ -80,24 +89,19 @@ def guess_mime(file_url):
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET_KEY,
-    same_site="lax",
-    https_only=SESSION_HTTPS_ONLY,  # set True in production
-    max_age=86400,  # 24 hours
-    session_cookie="session"
+    same_site=SESSION_SAME_SITE,  # "none" for cross-origin (Railway), "lax" for same-origin
+    https_only=SESSION_HTTPS_ONLY,  # True for production (Railway), False for localhost
+    max_age=86400,
+    session_cookie="session",
+    domain=None,  # Allow cross-origin cookies
 )
 
 
 
 
 
-# ✅ CORS (for React frontend)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
 
 # Configuration - In production, move these to environment variables
 cloudinary.config(
