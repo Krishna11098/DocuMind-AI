@@ -150,13 +150,13 @@ cloudinary.config(
 
 
 
-# Initialize Gemini model (once)
+# Initialize Gemini model (once) using gemini-2.5-flash-image as requested
 model = None
 if GENAI_API_KEY:
     try:
         genai.configure(api_key=GENAI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        print("✅ Gemini model initialized: gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash-image")
+        print("✅ Gemini model initialized: gemini-2.5-flash-image")
     except Exception as e:
         print(f"❌ Failed to initialize Gemini model: {e}")
         model = None
@@ -311,6 +311,7 @@ def analyze_document_with_gemini(file_url, file_type):
             departments_responsible, confidence.
             """
 
+            # gemini-2.5-flash supports image inputs without the -image suffix
             result = model.generate_content([*parts, prompt])
 
             return parse_gemini_response(result.text)
@@ -343,6 +344,7 @@ def analyze_document_with_gemini(file_url, file_type):
             departments_responsible, confidence.
             """
 
+            # gemini-2.5-flash supports image inputs without the -image suffix
             result = model.generate_content([image_part, prompt])
 
             return parse_gemini_response(result.text)
