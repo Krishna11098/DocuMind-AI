@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
 from firebase_admin_init import db
 from models import (UserSignup, User, EmployeeCreate, UserLogin, 
                     DocumentCreate, Document, PersonalDocumentStatus,
@@ -73,15 +74,14 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 app = FastAPI()
 
-# ✅ Add session middleware FIRST (before CORS)
+# ✅ Session middleware FIRST
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET_KEY,
-    same_site=SESSION_SAME_SITE,  # "none" for cross-origin (Railway), "lax" for same-origin
-    https_only=SESSION_HTTPS_ONLY,  # True for production (Railway), False for localhost
+    same_site="none",  # Must be "none" for cross-origin
+    https_only=True,   # Must be True when same_site="none"
     max_age=86400,
     session_cookie="session",
-    domain=None,  # Allow cross-origin cookies
 )
 
 app.add_middleware(
@@ -91,6 +91,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add middleware to fix cookie attributes for cross-origin
+@app.middleware("http")
+async def fix_cookie_middleware(request: Request, call_next):
+    response = await call_next(request)
+    
+    # Fix Set-Cookie header for cross-origin
+    if "set-cookie" in response.headers:
+        cookies = response.headers.getlist("set-cookie")
+        response.headers._list = [
+            (k, v) for k, v in response.headers._list if k.lower() != "set-cookie"
+        ]
+        for cookie in cookies:
+            # Ensure SameSite=None and Secure are set
+            if "session=" in cookie:
+                # Remove existing SameSite and Secure if present
+                cookie = cookie.split(";")[0]
+                # Add proper attributes
+                cookie += "; Path=/; HttpOnly; SameSite=None; Secure; Max-Age=86400"
+            response.headers.append("set-cookie", cookie)
+    
+    return response
 
 def guess_mime(file_url):
     mime, _ = mimetypes.guess_type(file_url)
