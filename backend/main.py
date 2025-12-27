@@ -39,8 +39,8 @@ import mimetypes
 
 from dotenv import load_dotenv
 import os
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+
 
 load_dotenv()
 # Load configuration from environment
@@ -98,8 +98,17 @@ cloudinary.config(
     api_secret=CLOUDINARY_API_SECRET
 )
 
-# Configure Gemini AI (Google Generative AI)
-client = genai.Client(api_key=GENAI_API_KEY) if GENAI_API_KEY else None
+
+
+
+GENAI_API_KEY = os.getenv("GENAI_API_KEY")
+
+if GENAI_API_KEY:
+    genai.configure(api_key=GENAI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+else:
+    model = None
+
 
 # ---------------------------- UTIL FUNCTIONS ----------------------------
 def generate_password(length=8):
