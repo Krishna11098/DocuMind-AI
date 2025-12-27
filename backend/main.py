@@ -41,6 +41,11 @@ import mimetypes
 from dotenv import load_dotenv
 import os
 import google.generativeai as genai
+try:
+    # types provides Blob/Part for multimodal inputs
+    from google.generativeai import types  # noqa: F401
+except Exception:
+    types = None
 
 
 load_dotenv()
@@ -70,7 +75,8 @@ print("=" * 50)
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
-GENAI_API_KEY = os.getenv("GENAI_API_KEY")
+# Accept either GENAI_API_KEY or GOOGLE_API_KEY
+GENAI_API_KEY = os.getenv("GENAI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 # Email configuration
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
@@ -144,19 +150,18 @@ cloudinary.config(
 
 
 
-GENAI_API_KEY = os.getenv("GENAI_API_KEY")
-
-# Initialize Gemini model
+# Initialize Gemini model (once)
 model = None
 if GENAI_API_KEY:
-    genai.configure(api_key=GENAI_API_KEY)
     try:
+        genai.configure(api_key=GENAI_API_KEY)
         model = genai.GenerativeModel("gemini-1.5-flash")
+        print("✅ Gemini model initialized: gemini-1.5-flash")
     except Exception as e:
-        print(f"Failed to initialize Gemini model: {e}")
+        print(f"❌ Failed to initialize Gemini model: {e}")
         model = None
-    model = genai.GenerativeModel("gemini-1.5-flash")
 else:
+    print("⚠️ No Gemini API key found in env (GENAI_API_KEY/GOOGLE_API_KEY)")
     model = None
 
 
@@ -282,6 +287,9 @@ def analyze_document_with_gemini(file_url, file_type):
 
             parts = []
 
+            if types is None:
+                raise Exception("google.generativeai 'types' module not available for multimodal inputs. Please upgrade/install the latest google-generativeai package.")
+
             for i in range(len(pdf)):
                 page = pdf.load_page(i)
                 pix = page.get_pixmap(dpi=180)   # good DPI for OCR
@@ -316,6 +324,9 @@ def analyze_document_with_gemini(file_url, file_type):
             mime = response.headers.get("Content-Type")
             if not mime or mime == "application/octet-stream":
                 mime = mimetypes.guess_type(file_url)[0] or "image/png"
+
+            if types is None:
+                raise Exception("google.generativeai 'types' module not available for multimodal inputs. Please upgrade/install the latest google-generativeai package.")
 
             image_part = types.Part(
                 inline_data=types.Blob(
@@ -1043,8 +1054,12 @@ async def analyze_text(request: Request, text: str = Form(...)):
     try:
         session = require_admin(request)
         
+        # Debug: log request details for troubleshooting 500s
+        print("/analyze-text called by:", session.get("email"))
+        print("Text length:", len(text) if text else 0)
         if not model:
-            raise HTTPException(status_code=500, detail="Gemini API not configured")
+            # Provide clearer error message for ops
+            raise HTTPException(status_code=500, detail="Gemini API not configured. Set GENAI_API_KEY or GOOGLE_API_KEY in environment.")
         
         prompt = f"""
         Analyze this document text and provide:
@@ -1062,12 +1077,20 @@ async def analyze_text(request: Request, text: str = Form(...)):
         Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
         """
         
-        response = model.generate_content(prompt)
-        # Parse the response to extract JSON
-        analysis = parse_gemini_response(response.text)
-        return analysis
+        try:
+            response = model.generate_content(prompt)
+            # Parse the response to extract JSON
+            analysis = parse_gemini_response(response.text)
+            return analysis
+        except Exception as e:
+            # Log and bubble up a helpful message
+            print("Gemini analyze-text error:", e)
+            raise HTTPException(status_code=500, detail=f"Gemini error: {e}")
         
+    except HTTPException:
+        raise
     except Exception as e:
+        print("/analyze-text internal error:", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1099,8 +1122,8 @@ async def create_text_document(
         
         # Analyze if requested
         if analyze:
-            if not client:
-                raise HTTPException(status_code=500, detail="Gemini API not configured")
+            if not model:
+                raise HTTPException(status_code=500, detail="Gemini API not configured. Set GENAI_API_KEY or GOOGLE_API_KEY in environment.")
             
             prompt = f"""
             Analyze this document text and provide:
@@ -1183,8 +1206,8 @@ async def analyze_document(request: Request, analyze_request: AnalyzeDocumentReq
             if not text_content:
                 raise HTTPException(status_code=400, detail="No text content found")
                 
-            if not client:
-                raise HTTPException(status_code=500, detail="Gemini API not configured")
+            if not model:
+                raise HTTPException(status_code=500, detail="Gemini API not configured. Set GENAI_API_KEY or GOOGLE_API_KEY in environment.")
             
             prompt = f"""
             Analyze this document text and provide:
