@@ -172,33 +172,49 @@ def generate_password(length=8):
 
 def send_email(receiver_email, password):
     """Send account credentials via SMTP using configured sender"""
-    sender_email = EMAIL_SENDER or ""
-    sender_password = EMAIL_PASSWORD or ""
-    
-    msg = EmailMessage()
-    msg.set_content(f"Your account has been created.\nEmail: {receiver_email}\nPassword: {password}")
-    msg['Subject'] = 'Your Account Credentials'
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
+    try:
+        sender_email = EMAIL_SENDER or ""
+        sender_password = EMAIL_PASSWORD or ""
+        
+        if not sender_email or not sender_password:
+            print(f"⚠️ Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
+            return
+        
+        msg = EmailMessage()
+        msg.set_content(f"Your account has been created.\nEmail: {receiver_email}\nPassword: {password}")
+        msg['Subject'] = 'Your Account Credentials'
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+        print(f"✅ Email sent to {receiver_email}")
+    except Exception as e:
+        print(f"❌ Error sending email: {e}")
 
 def send_otp_email(receiver_email, otp):
     """Send OTP via Gmail SMTP"""
-    sender_email = EMAIL_SENDER or ""
-    sender_password = EMAIL_PASSWORD or ""
-    
-    msg = EmailMessage()
-    msg.set_content(f"Your OTP is: {otp}\n\nThis OTP is valid for 5 minutes.")
-    msg['Subject'] = 'Your OTP Code'
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-        server.login(sender_email, sender_password)
-        server.send_message(msg)
+    try:
+        sender_email = EMAIL_SENDER or ""
+        sender_password = EMAIL_PASSWORD or ""
+        
+        if not sender_email or not sender_password:
+            print(f"⚠️ Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
+            return
+        
+        msg = EmailMessage()
+        msg.set_content(f"Your OTP is: {otp}\n\nThis OTP is valid for 5 minutes.")
+        msg['Subject'] = 'Your OTP Code'
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+        print(f"✅ OTP sent to {receiver_email}")
+    except Exception as e:
+        print(f"❌ Error sending OTP: {e}")
 
 def extract_text_from_pdf(file_url):
     """Extract text from PDF file"""
