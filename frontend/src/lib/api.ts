@@ -74,9 +74,10 @@ export async function logout() {
 }
 
 // Get current user
-export async function getCurrentUser(): Promise<ApiResponse<User>> {
+export async function getCurrentUser(signal?: AbortSignal): Promise<ApiResponse<User>> {
   const response = await fetch(`${API_BASE_URL}/me/`, {
     credentials: 'include',
+    signal,
   });
   return response.json();
 }

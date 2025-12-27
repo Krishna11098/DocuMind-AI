@@ -81,6 +81,11 @@ GENAI_API_KEY = os.getenv("GENAI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 # Email configuration
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "true").lower() == "true"
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "false").lower() == "true"
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "10"))
 
 
 
@@ -175,46 +180,60 @@ def send_email(receiver_email, password):
     try:
         sender_email = EMAIL_SENDER or ""
         sender_password = EMAIL_PASSWORD or ""
-        
+
         if not sender_email or not sender_password:
-            print(f"⚠️ Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
-            return
-        
+            raise RuntimeError("Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
+
         msg = EmailMessage()
         msg.set_content(f"Your account has been created.\nEmail: {receiver_email}\nPassword: {password}")
         msg['Subject'] = 'Your Account Credentials'
         msg['From'] = sender_email
         msg['To'] = receiver_email
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
+
+        if SMTP_USE_SSL:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+                if SMTP_USE_TLS:
+                    server.starttls()
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
         print(f"✅ Email sent to {receiver_email}")
     except Exception as e:
         print(f"❌ Error sending email: {e}")
+        raise RuntimeError(f"Send email failed: {e}")
 
 def send_otp_email(receiver_email, otp):
     """Send OTP via Gmail SMTP"""
     try:
         sender_email = EMAIL_SENDER or ""
         sender_password = EMAIL_PASSWORD or ""
-        
+
         if not sender_email or not sender_password:
-            print(f"⚠️ Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
-            return
-        
+            raise RuntimeError("Email not configured: EMAIL_SENDER or EMAIL_PASSWORD missing")
+
         msg = EmailMessage()
         msg.set_content(f"Your OTP is: {otp}\n\nThis OTP is valid for 5 minutes.")
         msg['Subject'] = 'Your OTP Code'
         msg['From'] = sender_email
         msg['To'] = receiver_email
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
+
+        if SMTP_USE_SSL:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
+                if SMTP_USE_TLS:
+                    server.starttls()
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
         print(f"✅ OTP sent to {receiver_email}")
     except Exception as e:
         print(f"❌ Error sending OTP: {e}")
+        raise RuntimeError(f"Send OTP failed: {e}")
 
 def extract_text_from_pdf(file_url):
     """Extract text from PDF file"""

@@ -14,22 +14,32 @@ export default function Navbar() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
+  const checkAuth = async (signal?: AbortSignal) => {
     try {
-      const response = await getCurrentUser();
+      const response = await getCurrentUser(signal);
       if (response.success && response.user) {
         setUser(response.user);
       }
-    } catch (error) {
-      console.log('Not authenticated');
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.log('Not authenticated', error);
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+
+    checkAuth(controller.signal).finally(() => window.clearTimeout(timeoutId));
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   const handleLogout = async () => {
     try {
