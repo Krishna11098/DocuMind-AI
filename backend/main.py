@@ -12,7 +12,7 @@ from models import (UserSignup, User, EmployeeCreate, UserLogin,
                     AnalyzeDocumentRequest, AssignDocumentRequest, 
                     UpdateDocumentStatusRequest, UpdatePersonalDocStatusRequest,
                     FileUploadResponse, DocumentStatus, PersonalDocStatus, OtpVerification,     SignupVerification, UserForgotPassword, UserResetPassword,
-                    Department, DepartmentWithEmployees, CreateDepartmentRequest)
+                    Department, DepartmentWithEmployees, CreateDepartmentRequest, TextDocumentCreate, ContentType)
 import hashlib
 import random
 import string
@@ -24,7 +24,6 @@ import uuid
 from datetime import datetime, timezone
 import cloudinary
 import cloudinary.uploader
-import google.generativeai as genai
 import requests
 import io
 from PIL import Image
@@ -40,6 +39,8 @@ import mimetypes
 
 from dotenv import load_dotenv
 import os
+from google import genai
+from google.genai import types
 
 load_dotenv()
 # Load configuration from environment
@@ -98,12 +99,7 @@ cloudinary.config(
 )
 
 # Configure Gemini AI (Google Generative AI)
-if GENAI_API_KEY:
-    try:
-        genai.configure(api_key=GENAI_API_KEY)
-    except Exception:
-        # Some genai versions expose configure differently; ignore if not applicable
-        pass
+client = genai.Client(api_key=GENAI_API_KEY) if GENAI_API_KEY else None
 
 # ---------------------------- UTIL FUNCTIONS ----------------------------
 def generate_password(length=8):
@@ -192,14 +188,7 @@ def parse_gemini_response(response_text: str) -> dict:
         return result
 
 
-
-from google import genai
-from google.genai import types
-import mimetypes
-import fitz
-import requests
-
-client = genai.Client(api_key=GENAI_API_KEY) if GENAI_API_KEY else genai.Client()
+# Initialize client for genai SDK
 
 
 def analyze_document_with_gemini(file_url, file_type):
@@ -846,6 +835,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
             document_id=document_id,
             file_name=file.filename,
             file_url=file_url,
+            content_type=ContentType.FILE,
             uploaded_by=session["email"],
             company_name=session["company_name"],
             timestamp=datetime.now()
@@ -870,7 +860,8 @@ async def analyze_text(request: Request, text: str = Form(...)):
     try:
         session = require_admin(request)
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        if not client:
+            raise HTTPException(status_code=500, detail="Gemini API not configured")
         
         prompt = f"""
         Analyze this document text and provide:
@@ -888,9 +879,98 @@ async def analyze_text(request: Request, text: str = Form(...)):
         Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
         """
         
-        response = model.generate_content(prompt)
-        return {"analysis": response.text}
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=prompt
+        )
+        # Parse the response to extract JSON
+        analysis = parse_gemini_response(response.text)
+        return analysis
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/create-text-document/")
+async def create_text_document(
+    request: Request, 
+    title: str = Form(...),
+    content: str = Form(...),
+    analyze: bool = Form(True)
+):
+    """Create a text document and optionally analyze it"""
+    try:
+        session = require_admin(request)
+        
+        document_id = str(uuid.uuid4())
+        
+        # Create document record with text content
+        document = Document(
+            document_id=document_id,
+            file_name=title,
+            file_url=None,
+            content_type=ContentType.TEXT,
+            content=content,
+            uploaded_by=session["email"],
+            company_name=session["company_name"],
+            timestamp=datetime.now(),
+            processing_status=DocumentStatus.PENDING if analyze else DocumentStatus.ANALYZED
+        )
+        
+        # Analyze if requested
+        if analyze:
+            if not client:
+                raise HTTPException(status_code=500, detail="Gemini API not configured")
+            
+            prompt = f"""
+            Analyze this document text and provide:
+            1. Summary (2-3 sentences)
+            2. Document type
+            3. Key findings (list)
+            4. Urgency score (0-100)
+            5. Importance score (0-100)
+            6. Departments that should handle this (list)
+            7. Confidence level (0-100)
+            
+            Document text:
+            {content}
+            
+            Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
+            """
+            
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=prompt
+                )
+                analysis = parse_gemini_response(response.text)
+                
+                # Update document with analysis results
+                document.summary = analysis.get("summary", "")
+                document.document_type = analysis.get("document_type", "Text Document")
+                document.urgency_score = analysis.get("urgency_score", 50)
+                document.importance_score = analysis.get("importance_score", 50)
+                document.departments_responsible = analysis.get("departments_responsible", ["General"])
+                document.confidence = analysis.get("confidence", 70)
+                document.key_findings = analysis.get("key_findings", [])
+                document.processing_status = DocumentStatus.ANALYZED
+                document.analyzed_at = datetime.now()
+            except Exception as e:
+                document.error_message = str(e)
+                document.processing_status = DocumentStatus.PENDING
+        
+        # Save to Firestore
+        doc_ref = db.collection("documents").document(document_id)
+        doc_ref.set(document.dict())
+        
+        return FileUploadResponse(
+            file_url=None,
+            document_id=document_id,
+            message="Text document created successfully" + (" and analyzed" if analyze else "")
+        )
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -917,23 +997,60 @@ async def analyze_document(request: Request, analyze_request: AnalyzeDocumentReq
         # Update status to processing
         doc_ref.update({"processing_status": DocumentStatus.PROCESSING})
         
-        # Determine file type from URL or filename
-        file_name = document_data["file_name"].lower()
-        file_type = "pdf" if file_name.endswith('.pdf') else "image"
+        # Check if it's a text document or file document
+        content_type = document_data.get("content_type", ContentType.FILE)
         
-        # Analyze with Gemini
-        analysis_result = analyze_document_with_gemini(document_data["file_url"], file_type)
+        if content_type == ContentType.TEXT:
+            # Analyze text content directly
+            text_content = document_data.get("content", "")
+            if not text_content:
+                raise HTTPException(status_code=400, detail="No text content found")
+                
+            if not client:
+                raise HTTPException(status_code=500, detail="Gemini API not configured")
+            
+            prompt = f"""
+            Analyze this document text and provide:
+            1. Summary (2-3 sentences)
+            2. Document type
+            3. Key findings (list)
+            4. Urgency score (0-100)
+            5. Importance score (0-100)
+            6. Departments that should handle this (list)
+            7. Confidence level (0-100)
+            
+            Document text:
+            {text_content}
+            
+            Format as JSON with keys: summary, document_type, key_findings, urgency_score, importance_score, departments_responsible, confidence
+            """
+            
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt
+            )
+            analysis_data = parse_gemini_response(response.text)
+        else:
+            # Analyze file document
+            if not document_data.get("file_url"):
+                raise HTTPException(status_code=400, detail="No file URL found")
+                
+            # Determine file type from filename
+            file_name = document_data["file_name"].lower()
+            file_type = "pdf" if file_name.endswith('.pdf') else "image"
+            
+            # Analyze with Gemini
+            analysis_result = analyze_document_with_gemini(document_data["file_url"], file_type)
+            
+            if not analysis_result:
+                doc_ref.update({
+                    "processing_status": DocumentStatus.PENDING,
+                    "error_message": "Failed to analyze document"
+                })
+                raise HTTPException(status_code=500, detail="Failed to analyze document")
+                
+            analysis_data = analysis_result
         
-        if not analysis_result:
-            doc_ref.update({
-                "processing_status": DocumentStatus.PENDING,
-                "error_message": "Failed to analyze document"
-            })
-            raise HTTPException(status_code=500, detail="Failed to analyze document")
-            
-        # analyze_document_with_gemini already returns a parsed dictionary
-        analysis_data = analysis_result
-            
         # Update document with analysis results
         update_data = {
             "processing_status": DocumentStatus.ANALYZED,
@@ -951,7 +1068,10 @@ async def analyze_document(request: Request, analyze_request: AnalyzeDocumentReq
         
         return {"message": "Document analyzed successfully", "analysis": analysis_data}
         
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Analyze document error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

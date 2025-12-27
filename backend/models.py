@@ -6,6 +6,10 @@ from datetime import datetime
 from enum import Enum
 
 # Enums for better type safety
+class ContentType(str, Enum):
+    FILE = "file"
+    TEXT = "text"
+
 class DocumentStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -75,7 +79,9 @@ class DocumentCreate(BaseModel):
 class Document(BaseModel):
     document_id: Optional[str] = None
     file_name: str
-    file_url: str
+    file_url: Optional[str] = None
+    content_type: ContentType = ContentType.FILE
+    content: Optional[str] = None
     uploaded_by: EmailStr
     company_name: str
     timestamp: datetime
@@ -138,7 +144,12 @@ class UpdatePersonalDocStatusRequest(BaseModel):
     status: PersonalDocStatus
     comments: Optional[str] = None
 
+class TextDocumentCreate(BaseModel):
+    title: str
+    content: str
+    analyze: bool = True
+
 class FileUploadResponse(BaseModel):
-    file_url: str
+    file_url: Optional[str] = None
     document_id: str
     message: str
