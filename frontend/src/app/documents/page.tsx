@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import Navbar from '@/components/Navbar';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface Document {
   document_id: string;
   file_name: string;
@@ -54,7 +56,7 @@ export default function DocumentsPage() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/documents/', {
+      const response = await fetch(`${API_BASE_URL}/documents/`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -73,7 +75,7 @@ export default function DocumentsPage() {
   const fetchDepartments = async () => {
     setDepartmentsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/departments/', {
+      const response = await fetch(`${API_BASE_URL}/departments/`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -103,7 +105,7 @@ export default function DocumentsPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/upload-file/', {
+      const response = await fetch(`${API_BASE_URL}/upload-file/`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
@@ -130,7 +132,7 @@ export default function DocumentsPage() {
     setMessage('');
 
     try {
-      const response = await fetch('http://localhost:8000/analyze-document/', {
+      const response = await fetch(`${API_BASE_URL}/analyze-document/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -165,7 +167,7 @@ export default function DocumentsPage() {
     setMessage('');
 
     try {
-      const response = await fetch('http://localhost:8000/assign-document/', {
+      const response = await fetch(`${API_BASE_URL}/assign-document/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -194,7 +196,7 @@ export default function DocumentsPage() {
     if (employeeStatuses[docId]) return;
     setStatusLoading(docId);
     try {
-      const response = await fetch(`http://localhost:8000/employee-document-status/${docId}`, {
+      const response = await fetch(`${API_BASE_URL}/employee-document-status/${docId}`, {
         credentials: 'include',
       });
       if (response.ok) {

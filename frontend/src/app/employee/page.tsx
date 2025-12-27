@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import Navbar from '@/components/Navbar';
 import { getCurrentUser, User } from '@/lib/api';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface Document {
   document_id: string;
   file_name: string;
@@ -62,7 +64,7 @@ export default function EmployeeDashboard() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/my-documents/', {
+      const response = await fetch(`${API_BASE_URL}/my-documents/`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -93,7 +95,7 @@ export default function EmployeeDashboard() {
     setUpdatingStatus(docId);
 
     try {
-      const response = await fetch('http://localhost:8000/update-personal-doc-status/', {
+      const response = await fetch(`${API_BASE_URL}/update-personal-doc-status/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

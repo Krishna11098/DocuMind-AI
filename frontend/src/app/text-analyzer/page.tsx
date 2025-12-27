@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface AnalysisResult {
   summary: string;
   document_type: string;
@@ -33,7 +35,7 @@ export default function TextAnalyzer() {
       const formData = new FormData();
       formData.append('text', text);
 
-      const response = await fetch('http://localhost:8000/analyze-text/', {
+      const response = await fetch(`${API_BASE_URL}/analyze-text/`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
@@ -63,7 +65,7 @@ export default function TextAnalyzer() {
       formData.append('content', text);
       formData.append('analyze', 'true');
 
-      const response = await fetch('http://localhost:8000/create-text-document/', {
+      const response = await fetch(`${API_BASE_URL}/create-text-document/`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
